@@ -93,10 +93,13 @@ header.header-hidden {
   margin: 0 auto;
 }
 .nav-inner {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
+  gap: min(24px, 1.667vw);
 }
+.nav-inner .logo-wrap { justify-self: start; }
+.nav-inner .nav-links { justify-self: center; }
 .logo-wrap { overflow: hidden; }
 .logo-hidden {
   transform: translateY(0);
@@ -142,6 +145,7 @@ header.header-hidden {
 .nav-right {
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: min(28px, 1.944vw);
 }
 .nav-links {
