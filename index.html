@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    if (localStorage.getItem('theme') === 'dark') document.documentElement.dataset.theme = 'dark'
+  </script>
+  <title>John Kleber Fonseca | Consultor de Investimentos · W1 Consultoria</title>
+  <meta name="description" content="Planejamento financeiro 360° — diagnóstico, proteção patrimonial, investimentos e planejamento de aposentadoria. Campinas, São Paulo.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;600&family=Ibarra+Real+Nova:ital,wght@0,400;1,400&family=Zen+Kaku+Gothic+New:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js"}}
+  </script>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="w-full">
+  <!-- Desktop Nav -->
+  <section class="nav-desktop">
+    <div>
+      <div class="nav-inner">
+        <div class="logo-wrap">
+          <div class="logo-hidden">
+            <a href="#top" class="logo-link">
+              <img src="./img/brand/telos-wealth-logo-transparent.png" alt="Telos Wealth" class="brand-logo-img">
+            </a>
+          </div>
+        </div>
+        <div class="nav-right">
+          <ul class="nav-links">
+            <li class="nav-item"><div><a href="#works" class="nav-link" data-animate>PLANEJAMENTO PATRIMONIAL</a><div class="nav-underline"><span class="nav-underline-span"></span></div></div></li>
+            <li class="nav-item"><div><a href="#about" class="nav-link" data-animate>SOBRE</a><div class="nav-underline"><span class="nav-underline-span"></span></div></div></li>
+            <li class="nav-item"><div><a href="#contact" class="nav-link" data-animate>CONTATO</a><div class="nav-underline"><span class="nav-underline-span"></span></div></div></li>
+          </ul>
+          <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Alternar tema claro/escuro">
+            <svg class="theme-icon theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+            <svg class="theme-icon theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Mobile Nav -->
+  <section class="nav-mobile">
+    <div class="nav-mobile-bar">
+      <div class="nav-mobile-inner">
+        <div class="logo-wrap">
+          <div class="logo-hidden">
+            <a href="#top" class="logo-link-mobile">
+              <img src="./img/brand/telos-wealth-logo-transparent.png" alt="Telos Wealth" class="brand-logo-img">
+            </a>
+          </div>
+        </div>
+        <div class="nav-right">
+          <button type="button" class="theme-toggle" id="theme-toggle-mobile" aria-label="Alternar tema claro/escuro">
+            <svg class="theme-icon theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+            <svg class="theme-icon theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+          </button>
+          <button type="button" class="hamburger" id="hamburger" aria-label="menu">
+            <span class="hamburger-line hamburger-line-top"></span>
+            <span class="hamburger-line hamburger-line-bottom"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="mobile-menu" id="mobile-menu">
+      <div class="mobile-menu-inner">
+        <div class="mobile-menu-links">
+          <ul>
+            <li><a href="#top" class="mobile-link">HOME</a></li>
+            <li><a href="#works" class="mobile-link">PLANEJAMENTO PATRIMONIAL</a></li>
+            <li><a href="#about" class="mobile-link">SOBRE</a></li>
+            <li><a href="#contact" class="mobile-link">CONTATO</a></li>
+          </ul>
+        </div>
+        <div class="mobile-menu-address">
+          <p class="mobile-address-text">W1 Consultoria Financeira<br>Campinas, São Paulo<br>Brasil</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</header>
+
+<!-- MAIN CONTENT -->
+<div>
+<section>
+  <div id="top"></div>
+
+  <!-- HERO -->
+  <section class="hero-section">
+    <div class="hero-inner">
+      <div class="hero-left">
+        <div>
+          <h2 class="hero-tagline-jp" data-animate>Esta é a página de vendas de um multi-family office.</h2>
+        </div>
+        <div>
+          <h2 class="hero-tagline-en" data-animate>A gente cuida do seu dinheiro. Inclusive (e principalmente) para que a próxima geração não torre tudo brincando de investidor no Google.</h2>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLANEJAMENTO PATRIMONIAL SECTION -->
+  <section class="works-section" id="works">
+    <div class="works-container">
+      <div class="works-header-wrap">
+        <h2 class="works-heading" data-animate>PLANEJAMENTO PATRIMONIAL</h2>
+      </div>
+      <div class="works-body">
+        <p class="works-body-text" data-fade-up>Nós sentamos com você, entendemos onde a sua família está hoje e para onde todo mundo quer ir. Mapeamos os sonhos, os custos fixos, as ambições desmedidas e aquele estilo de vida que você trabalhou duro para conquistar.</p>
+        <p class="works-body-text" data-fade-up>Ter um Family Office estruturando o seu patrimônio é comprovadamente mais eficiente para evitar brigas no Natal do que pagar terapia em grupo para a família inteira. (Ok, a ciência ainda não atestou isso oficialmente, mas a nossa experiência prática com herdeiros e planilhas assina embaixo).</p>
+      </div>
+      <div class="view-all-wrap">
+        <div class="view-all-link-wrap">
+          <a href="https://instagram.com/jfonseca.consultor" class="view-all-link">
+            <span class="view-all-text">ANÁLISE GRATUITA</span>
+            <span class="view-all-count"></span>
+            <img src="./img/icon/icon-view-all-works-icon.svg" alt="Fale comigo" class="view-all-icon">
+          </a>
+          <div class="view-all-underline">
+            <span class="view-all-underline-bg"></span>
+            <span class="view-all-underline-active"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cube placeholder for WORKS section -->
+      <div data-works-cube-large class="works-cube-large"></div>
+    </div>
+  </section>
+
+  <!-- PROCESSO -->
+  <section class="processo-section" id="processo">
+    <div class="processo-container">
+      <div class="processo-top">
+        <h2 class="section-heading" data-animate>MODELOS FEE-BASED E COMISSION-BASED</h2>
+      </div>
+      <div class="processo-body">
+        <p class="processo-body-text" data-fade-up>Você lembra daquela cena clássica em O Lobo de Wall Street onde o Jordan Belfort vende ações duvidosas só porque a comissão dele era de 50%?</p>
+        <p class="processo-body-text" data-fade-up>O filme é ótimo, a atuação do DiCaprio é fenomenal, mas o mecanismo por trás não é tão bonito assim: o ganho do vendedor aumenta justamente quando o cliente faz escolhas ruins. É o modelo comission-based. O corretor ganha um percentual a cada produto que empurra para você. Se o ativo é excelente para o seu futuro ou se é apenas excelente para bater a meta do trimestre dele... bem, a resposta está na conta bancária dele, não na sua.</p>
+        <p class="processo-body-text" data-fade-up>Para suavizar essa imagem, criaram o modelo fee-based. É um formato híbrido: você paga uma taxa fixa de gestão, mas o profissional ainda recebe comissões e rebates escondidos nos produtos que recomenda. Na prática, o conflito de interesses continua vivo.</p>
+        <p class="processo-body-text" data-fade-up>Sabe aquele investimento "imperdível" que o seu gerente te ofereceu semana passada? Pois é. A única pessoa para quem ele era realmente imperdível era para ele, que bateu a meta do mês vendendo o que quer que fosse aquilo.</p>
+      </div>
+    </div>
+    <div class="home-scroll-trigger"></div>
+  </section>
+
+  <!-- FEE-ONLY -->
+  <section class="feeonly-section" id="fee-only">
+    <div class="feeonly-container">
+      <div class="feeonly-top">
+        <h2 class="section-heading" data-animate>MODELO FEE-ONLY</h2>
+      </div>
+      <div class="feeonly-intro">
+        <p class="feeonly-intro-text" data-fade-up>Aqui, adotamos o modelo Fee-Only.</p>
+        <p class="feeonly-intro-text" data-fade-up>Na prática, isso significa que você nos paga um valor fixo e transparente para gerir e proteger seu patrimônio. A mágica desse modelo é o alinhamento irrestrito de interesses:</p>
+      </div>
+      <div class="feeonly-list">
+        <div class="feeonly-item" data-fade-up>
+          <h3 class="feeonly-item-title">Comissão Zero por produto</h3>
+          <p class="feeonly-item-desc">Se indicamos um ativo, é porque ele é o melhor do planeta para a sua carteira, ponto final. Não recebemos um centavo de corretoras ou emissores de fundos.</p>
+        </div>
+        <div class="feeonly-item" data-fade-up>
+          <h3 class="feeonly-item-title">Você pode nos processar</h3>
+          <p class="feeonly-item-desc">Se a gente ganhar um centavo de comissão por trás dos seus investimentos, o processo tá liberado. (Sério, tá no contrato).</p>
+        </div>
+        <div class="feeonly-item" data-fade-up>
+          <h3 class="feeonly-item-title">O mesmo lado da mesa</h3>
+          <p class="feeonly-item-desc">A nossa remuneração cresce quando o seu patrimônio cresce. Se você ganha, nós ganhamos. Se a sua carteira estagna, a nossa empresa estagna.</p>
+        </div>
+        <div class="feeonly-item" data-fade-up>
+          <h3 class="feeonly-item-title">O que você fala na Telos, fica na Telos</h3>
+          <p class="feeonly-item-desc">Sigilo absoluto. Nem a sua sogra vai saber os seus números.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ANÁLISE -->
+  <section class="analise-section" id="analise">
+    <div class="analise-container">
+      <h2 class="section-heading" data-animate>NOSSA ABORDAGEM</h2>
+
+      <div class="abordagem-body">
+        <p class="abordagem-text" data-fade-up>A verdade é que gerir dinheiro não precisa ser tão emocionante quanto pular de paraquedas sem reserva, nem tão chato quanto ler termos e condições de aplicativo. Tratar da sua riqueza deve ser leve, transparente e absurdamente eficiente.</p>
+        <p class="abordagem-text" data-fade-up>O mercado financeiro tem uma paixão obsessiva por complicar as coisas. Poderíamos ostentar termos em inglês como asset allocation, risk management e yield optimization só para soar como robôs sofisticados.</p>
+        <p class="abordagem-text" data-fade-up>Mas a nossa especialidade é transformar estratégias de investimento complexas em algo tão cristalino e natural quanto um papo entre amigos. A lógica é bem idiota de tão simples:</p>
+        <div class="abordagem-cascade" data-fade-up>
+          <p class="abordagem-cascade-line">Objetivos completamente diferentes <span>(Aposentar aos 40 vs. Comprar um barco ano que vem)</span></p>
+          <p class="abordagem-cascade-line">Exigem investimentos completamente diferentes <span>(Renda fixa sem graça vs. Risco controlado que dá frio na barriga)</span></p>
+          <p class="abordagem-cascade-line">Que geram resultados completamente diferentes <span>(Crescimento lento e em paz vs. Montanha-russa com topo mais alto)</span></p>
+        </div>
+        <p class="abordagem-text" data-fade-up>Não tem mágica. Não tem algoritmo secreto. Tem um ser humano do outro lado ajustando as coisas conforme a sua vida muda e o mercado surta.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- NOSSO TIME -->
+  <section class="time-section" id="time">
+    <div class="time-container">
+      <h2 class="section-heading" data-animate>NOSSO TIME</h2>
+
+      <div class="time-body">
+        <p class="time-text" data-fade-up>Aqui é esperado que eu destaque os diferenciais do nosso time. Faz sentido, afinal, você não vai entregar as economias de uma vida inteira na mão de alguém cuja maior experiência financeira foi não falir jogando Banco Imobiliário.</p>
+        <p class="time-text" data-fade-up>Então eu provavelmente deveria te dizer que todo o nosso time conta com a certificação CFP® (Certified Financial Planner).</p>
+        <p class="time-text" data-fade-up>E o que diabos é isso?</p>
+        <p class="time-text" data-fade-up>Segundo a IA (vulgo o ChatGPT), é a certificação mais casca-grossa e respeitada do mercado financeiro mundial. É um selo que exige comprovação de anos de experiência prática não só em investimentos, mas em planejamento tributário, sucessório, aposentadoria e gestão de riscos e a aprovação em uma prova brutal, com uma taxa de reprovação que deixa qualquer um duvidando das próprias escolhas de vida.</p>
+        <p class="time-text" data-fade-up>Basicamente, é a garantia de que a gente queimou os neurônios estudando essa bagunça muito a fundo.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- DARK SECTION — ring animation -->
+  <section class="dark-section" id="dark-section">
+    <div class="dark-canvas-wrap">
+      <div class="dark-canvas-container" id="dark-canvas-container"></div>
+    </div>
+  </section>
+
+  <!-- BLOG -->
+  <section class="blog-section" id="blog">
+    <div class="blog-container">
+      <div class="blog-header">
+        <h2 class="section-heading" data-animate>BLOG</h2>
+      </div>
+      <div class="blog-grid">
+        <article class="blog-card" data-fade-up>
+          <span class="blog-cat">PLANEJAMENTO</span>
+          <h3 class="blog-title">Como estruturar sua reserva de emergência — e por que a maioria erra nisso</h3>
+          <p class="blog-excerpt">A reserva de emergência é o alicerce de qualquer plano financeiro. Mas apenas guardar dinheiro na poupança não é suficiente. Entenda como fazer isso de forma inteligente.</p>
+          <div class="blog-footer">
+            <span class="blog-date">Jun 2025</span>
+            <a href="#" class="blog-read">Ler mais →</a>
+          </div>
+        </article>
+        <article class="blog-card" data-fade-up>
+          <span class="blog-cat">INVESTIMENTOS</span>
+          <h3 class="blog-title">Renda fixa ou variável: onde colocar seu dinheiro neste momento</h3>
+          <p class="blog-excerpt">Com a taxa Selic em constante movimento, a dúvida entre renda fixa e variável se torna cada vez mais relevante. Saiba como equilibrar os dois de acordo com o seu perfil.</p>
+          <div class="blog-footer">
+            <span class="blog-date">Mai 2025</span>
+            <a href="#" class="blog-read">Ler mais →</a>
+          </div>
+        </article>
+        <article class="blog-card" data-fade-up>
+          <span class="blog-cat">APOSENTADORIA</span>
+          <h3 class="blog-title">A aposentadoria que ninguém planeja — e que acaba dependendo dos outros</h3>
+          <p class="blog-excerpt">A maioria das pessoas chega aos 60 anos sem um plano real. Veja quanto você precisaria guardar hoje para garantir sua independência financeira no futuro.</p>
+          <div class="blog-footer">
+            <span class="blog-date">Abr 2025</span>
+            <a href="#" class="blog-read">Ler mais →</a>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="faq-section" id="faq">
+    <div class="faq-container">
+      <h2 class="section-heading" data-animate>FAQ</h2>
+      <ul class="faq-list">
+        <li class="faq-item" data-fade-up>
+          <button class="faq-btn" type="button">
+            <span class="faq-q">O que faz um consultor de investimentos?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-ans"><div class="faq-ans-inner"><p>Um consultor de investimentos analisa sua situação financeira completa e elabora estratégias personalizadas para atingir seus objetivos — seja sair das dívidas, investir com inteligência ou se aposentar com segurança. Diferente de gerentes de banco, o consultor independente não tem conflito de interesse: ele trabalha exclusivamente para você.</p></div></div>
+        </li>
+        <li class="faq-item" data-fade-up>
+          <button class="faq-btn" type="button">
+            <span class="faq-q">Preciso ter muito dinheiro para começar?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-ans"><div class="faq-ans-inner"><p>Não. Trabalhamos com clientes em diferentes estágios financeiros — desde quem está começando do zero até quem já possui um patrimônio consolidado. O mais importante é ter o desejo real de mudar sua relação com o dinheiro.</p></div></div>
+        </li>
+        <li class="faq-item" data-fade-up>
+          <button class="faq-btn" type="button">
+            <span class="faq-q">Como o consultor é remunerado?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-ans"><div class="faq-ans-inner"><p>Trabalhamos com fee fixo (honorário mensal) ou taxa de performance, dependendo do perfil do cliente. Não recebemos comissões de produtos financeiros. Isso garante total imparcialidade nas nossas recomendações.</p></div></div>
+        </li>
+        <li class="faq-item" data-fade-up>
+          <button class="faq-btn" type="button">
+            <span class="faq-q">Em quanto tempo começo a ver resultados?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-ans"><div class="faq-ans-inner"><p>Clientes que seguem o plano com consistência costumam notar diferenças visíveis nos primeiros 90 dias — mais clareza, menos ansiedade financeira e as primeiras movimentações estratégicas. Resultados patrimoniais de longo prazo se consolidam em 12 a 36 meses.</p></div></div>
+        </li>
+        <li class="faq-item" data-fade-up>
+          <button class="faq-btn" type="button">
+            <span class="faq-q">Como funciona o diagnóstico gratuito?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-ans"><div class="faq-ans-inner"><p>É uma conversa de 30 a 45 minutos onde mapeamos sua situação atual, seus objetivos e os principais pontos de melhoria. Sem compromisso. Ao final, você já sai com insights práticos — independente de contratar ou não.</p></div></div>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="site-footer" id="contact">
+    <div class="footer-inner">
+      <div>
+        <a href="https://instagram.com/jfonseca.consultor" class="footer-contact-cta">
+          <div class="footer-cta-inner">
+            <p class="footer-cta-text" data-animate>Comece Agora</p>
+            <img src="./img/icon/icon-footer-contact-arrow.svg" alt="" class="footer-cta-arrow">
+          </div>
+        </a>
+      </div>
+      <div class="footer-bottom">
+        <div>
+          <ul class="footer-nav">
+            <li class="footer-nav-item"><div><a href="#works" class="footer-nav-link">PLANEJAMENTO PATRIMONIAL</a><div class="footer-nav-underline"></div></div></li>
+            <li class="footer-nav-item"><div><a href="#analise" class="footer-nav-link">ANÁLISE</a><div class="footer-nav-underline"></div></div></li>
+            <li class="footer-nav-item"><div><a href="#blog" class="footer-nav-link">BLOG</a><div class="footer-nav-underline"></div></div></li>
+            <li class="footer-nav-item"><div><a href="#contact" class="footer-nav-link">CONTATO</a><div class="footer-nav-underline"></div></div></li>
+          </ul>
+        </div>
+        <div class="footer-right">
+          <div>
+            <ul class="footer-social">
+              <li class="footer-social-item"><div><a href="https://instagram.com/jfonseca.consultor" class="footer-social-link">Instagram</a><div class="footer-social-underline"></div></div></li>
+              <li class="footer-social-item"><div><a href="https://linkedin.com/in/john-kleber-fonseca" class="footer-social-link">LinkedIn</a><div class="footer-social-underline"></div></div></li>
+            </ul>
+          </div>
+          <div>
+            <p class="footer-copy">©John Kleber Fonseca · W1 Consultoria Financeira</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+</section>
+</div>
+
+<!-- Overlay: cobre as partículas na dark section sem cortina -->
+<div class="dark-overlay" id="dark-overlay"></div>
+
+<!-- WebGL fixed canvas container (particle background) -->
+<section class="webgl-fixed-section">
+  <div class="webgl-fade-wrap" id="webgl-fade-wrap">
+    <div class="webgl-container" id="webgl-container"></div>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.1.14/dist/lenis.min.js"></script>
+<script type="module" src="main.js?v=7"></script>
+</body>
+</html>
