@@ -90,35 +90,83 @@ function fleePositions(restPositions, edgeX) {
   return result
 }
 
-function drawScaleIcon(ctx, W, H) {
+/* solid crystal dome magnifier — a low, round glass disc (the classic
+   "reading stone"), not a rectangular block or a handled lens: a flattened
+   ellipse with a concentric rim groove punched through it, the same way
+   the notepad's spiral rings read as gaps rather than a solid blob */
+function drawCrystalMagnifierIcon(ctx, W, H) {
   ctx.fillStyle = '#fff'
-  ctx.strokeStyle = '#fff'
-  const cx = W / 2
-  const armY = H * 0.22
+  const cx = W / 2, cy = H * 0.52
+  const rx = W * 0.34, ry = rx * 0.82   /* low dome profile, not a full sphere */
 
-  /* vertical stem */
-  ctx.fillRect(cx - 7, armY, 14, H * 0.56)
-  /* beam */
-  ctx.fillRect(W * 0.16, armY - 6, W * 0.68, 12)
-  /* base */
   ctx.beginPath()
-  ctx.moveTo(cx - 80, H * 0.88)
-  ctx.lineTo(cx + 80, H * 0.88)
-  ctx.lineTo(cx, H * 0.78)
-  ctx.closePath()
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, PI * 2)
   ctx.fill()
 
-  /* two hanging pans */
-  const leftX = W * 0.16, rightX = W * 0.84
-  ;[leftX, rightX].forEach(x => {
-    ctx.lineWidth = 7
-    ctx.beginPath(); ctx.moveTo(x - 34, armY); ctx.lineTo(x, armY + 95); ctx.stroke()
-    ctx.beginPath(); ctx.moveTo(x + 34, armY); ctx.lineTo(x, armY + 95); ctx.stroke()
-    ctx.lineWidth = 10
-    ctx.beginPath()
-    ctx.ellipse(x, armY + 95, 58, 20, 0, 0, PI)
-    ctx.stroke()
-  })
+  ctx.globalCompositeOperation = 'destination-out'
+  ctx.lineWidth = 9
+  ctx.beginPath()
+  ctx.ellipse(cx, cy, rx * 0.74, ry * 0.74, 0, 0, PI * 2)
+  ctx.stroke()
+}
+
+/* volume cue for the magnifier: particles near the center of the dome are
+   both pushed toward the camera (real z bulge, hemisphere profile) AND
+   rendered as bigger points — size is what the eye actually reads as depth
+   in a 1px point cloud, brightness alone (tried before) is imperceptible
+   at that scale. scaleMap is read every frame by the swap-guard in
+   update() to populate the pointScale1 attribute. */
+let magnifierScaleMap = null
+
+function buildMagnifierPositions(count) {
+  const RES = 512, worldSize = 350, xOffset = 180
+  const cv = document.createElement('canvas')
+  cv.width = RES; cv.height = RES
+  const ctx = cv.getContext('2d')
+  ctx.clearRect(0, 0, RES, RES)
+  drawCrystalMagnifierIcon(ctx, RES, RES)
+
+  const img = ctx.getImageData(0, 0, RES, RES).data
+  const filled = []
+  for (let y = 0; y < RES; y++) {
+    for (let x = 0; x < RES; x++) {
+      if (img[(y * RES + x) * 4 + 3] > 40) filled.push(x, y)
+    }
+  }
+
+  const half = worldSize / 2
+  const result = new Float32Array(count * 3)
+  const scaleMap = new Float32Array(count).fill(1.0)
+  const domeCx = RES / 2, domeCy = RES * 0.52
+  const domeRx = RES * 0.34, domeRy = domeRx * 0.82
+  const maxBulge = 55
+
+  if (filled.length > 0) {
+    for (let i = 0; i < count; i++) {
+      const idx = (Math.random() * (filled.length / 2) | 0) * 2
+      const px = filled[idx], py = filled[idx + 1]
+      const jx = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      const jy = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      result[i * 3]     = (px / RES) * worldSize - half + jx + xOffset
+      result[i * 3 + 1] = -((py / RES) * worldSize - half) + jy
+
+      const nx = (px - domeCx) / domeRx
+      const ny = (py - domeCy) / domeRy
+      const distNorm = Math.min(1, Math.sqrt(nx * nx + ny * ny))
+      const bulge = Math.sqrt(Math.max(0, 1 - distNorm * distNorm)) * maxBulge
+      result[i * 3 + 2] = bulge + (Math.random() - 0.5) * 10
+      scaleMap[i] = lerp(3.0, 0.9, distNorm)
+    }
+  } else {
+    for (let i = 0; i < count; i++) {
+      result[i * 3]     = (Math.random() - 0.5) * worldSize + xOffset
+      result[i * 3 + 1] = (Math.random() - 0.5) * worldSize
+      result[i * 3 + 2] = (Math.random() - 0.5) * 25
+    }
+  }
+
+  magnifierScaleMap = scaleMap
+  return result
 }
 
 function drawShieldIcon(ctx, W, H) {
@@ -137,55 +185,116 @@ function drawShieldIcon(ctx, W, H) {
   ctx.fill()
 }
 
-function drawTreeIcon(ctx, W, H) {
+function drawCompassIcon(ctx, W, H) {
   ctx.fillStyle = '#fff'
   ctx.strokeStyle = '#fff'
   const cx = W / 2
-  const groundY = H * 0.62
+  const hingeY = H * 0.24
 
-  /* trunk — tapered, wider at the base */
+  /* hinge knob + handle */
   ctx.beginPath()
-  ctx.moveTo(cx - 8, H * 0.30)
-  ctx.lineTo(cx + 8, H * 0.30)
-  ctx.lineTo(cx + 18, groundY)
-  ctx.lineTo(cx - 18, groundY)
-  ctx.closePath()
+  ctx.arc(cx, hingeY, 16, 0, PI * 2)
   ctx.fill()
+  ctx.lineWidth = 10
+  ctx.beginPath()
+  ctx.moveTo(cx, hingeY - 10)
+  ctx.lineTo(cx, hingeY - 46)
+  ctx.stroke()
 
-  /* canopy — cluster of overlapping blobs */
-  const canopy = [
-    [cx, H * 0.20, 62], [cx - 55, H * 0.30, 50], [cx + 55, H * 0.30, 50],
-    [cx - 30, H * 0.14, 42], [cx + 30, H * 0.14, 42], [cx, H * 0.34, 55],
-  ]
-  canopy.forEach(([x, y, r]) => {
-    ctx.beginPath()
-    ctx.arc(x, y, r, 0, PI * 2)
-    ctx.fill()
-  })
+  /* fixed leg (metal point) — left side, stays put */
+  ctx.lineWidth = 14
+  ctx.beginPath()
+  ctx.moveTo(cx, hingeY)
+  ctx.lineTo(cx - 78, H * 0.84)
+  ctx.stroke()
 
-  /* roots — diverging lines below the trunk */
-  ctx.lineWidth = 6
-  const rootSpread = [-70, -35, 0, 35, 70]
-  rootSpread.forEach(dx => {
-    ctx.beginPath()
-    ctx.moveTo(cx, groundY - 6)
-    ctx.lineTo(cx + dx, H * 0.86)
-    ctx.stroke()
-  })
+  /* moving leg (pencil) — right side, this is the one that sweeps */
+  ctx.beginPath()
+  ctx.moveTo(cx, hingeY)
+  ctx.lineTo(cx + 78, H * 0.84)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.arc(cx + 78, H * 0.84, 12, 0, PI * 2)
+  ctx.fill()
+}
+
+/* populated by buildCompassPositions the first (and only) time it runs —
+   basePositions is the compass at rest (angle 0), legMask flags which
+   particles belong to the moving leg, pivot is the hinge in the same
+   world-space coordinates as the position buffers. read every frame by
+   ParticleSystem._applyCompassSweep to rotate the moving leg in place. */
+let compassSweepMeta = null
+
+function buildCompassPositions(count) {
+  const RES = 512, worldSize = 350, depthJitter = 25, xOffset = 180
+  const cv = document.createElement('canvas')
+  cv.width = RES; cv.height = RES
+  const ctx = cv.getContext('2d')
+  ctx.clearRect(0, 0, RES, RES)
+  drawCompassIcon(ctx, RES, RES)
+
+  const img = ctx.getImageData(0, 0, RES, RES).data
+  const filled = []
+  for (let y = 0; y < RES; y++) {
+    for (let x = 0; x < RES; x++) {
+      if (img[(y * RES + x) * 4 + 3] > 40) filled.push(x, y)
+    }
+  }
+
+  const half = worldSize / 2
+  const result = new Float32Array(count * 3)
+  const legMask = new Uint8Array(count)
+  const hingePx = RES / 2
+  const legSplitPx = hingePx + 4   /* everything right of the hinge is the moving leg */
+
+  if (filled.length === 0) {
+    /* icon canvas produced nothing usable — soft neutral cluster instead of NaNs */
+    for (let i = 0; i < count; i++) {
+      result[i * 3]     = (Math.random() - 0.5) * worldSize + xOffset
+      result[i * 3 + 1] = (Math.random() - 0.5) * worldSize
+      result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
+    }
+  } else {
+    for (let i = 0; i < count; i++) {
+      const idx = (Math.random() * (filled.length / 2) | 0) * 2
+      const px = filled[idx], py = filled[idx + 1]
+      const jx = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      const jy = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      result[i * 3]     = (px / RES) * worldSize - half + jx + xOffset
+      result[i * 3 + 1] = -((py / RES) * worldSize - half) + jy
+      result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
+      legMask[i] = px > legSplitPx ? 1 : 0
+    }
+  }
+
+  const hingeYpx = RES * 0.24
+  const pivot = {
+    x: (hingePx / RES) * worldSize - half + xOffset,
+    y: -((hingeYpx / RES) * worldSize - half),
+    z: 0,
+  }
+  compassSweepMeta = { pivot, legMask, basePositions: result.slice() }
+  return result
 }
 
 // ─── GLSL SHADERS ─────────────────────────────────────────────────────────────
 
+/* pointScale0/pointScale1 default to 1.0 (today's fixed point size) for every
+   shape — only the magnifier's build writes real values into pointScale1
+   (see magnifierScaleMap), so this is invisible everywhere else */
 const particleVertexShader = `
 in vec3 position;
 in vec3 position1;
+in float pointScale0;
+in float pointScale1;
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
 uniform float u_progress;
 void main() {
   vec3 finalPosition = mix(position, position1, u_progress);
+  float pScale = mix(pointScale0, pointScale1, u_progress);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(finalPosition, 1.0);
-  gl_PointSize = 1.0;
+  gl_PointSize = pScale;
 }
 `
 
@@ -304,7 +413,9 @@ const PARTICLE_SHAPES = [
   {
     selector: '.works-section',
     anchorOffset: 550,   /* a bit lower than the shared default */
-    build: count => silhouettePositions(drawTreeIcon, count, 350, 25, 180),
+    build: count => buildCompassPositions(count),
+    sweep: true,      /* moving leg rotates in place for a moment before dissolving */
+    plateau: 130,     /* hold fully solid through the whole sweep window (see SWEEP_END below) before starting to dissolve */
   },
   {
     selector: '.analise-section',
@@ -318,7 +429,8 @@ const PARTICLE_SHAPES = [
   {
     selector: '.processo-section',
     anchorOffset: 450,   /* a bit higher than the shared default */
-    build: count => silhouettePositions(drawScaleIcon, count, 350, 25, 180),
+    build: count => buildMagnifierPositions(count),
+    hasVolume: true,   /* bigger + closer at the center, smaller + flatter at the rim */
   },
   {
     selector: '.feeonly-section',
@@ -359,6 +471,9 @@ class ParticleSystem {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(restPositions, 3))
     geo.setAttribute('position1', new THREE.BufferAttribute(restPositions.slice(), 3))
+    const neutralScale = new Float32Array(this.pointCount).fill(1.0)
+    geo.setAttribute('pointScale0', new THREE.BufferAttribute(neutralScale, 1))
+    geo.setAttribute('pointScale1', new THREE.BufferAttribute(neutralScale.slice(), 1))
     this.geo = geo
 
     const isDark = document.documentElement.dataset.theme === 'dark'
@@ -380,6 +495,14 @@ class ParticleSystem {
       const c = e.detail.theme === 'dark' ? PARTICLE_COLOR_DARK : PARTICLE_COLOR_LIGHT
       this.material.uniforms.u_color.value.set(...c)
     })
+
+    /* section heights shift once web fonts swap in (Roboto/Ibarra load async
+       with font-display:swap) — anchors measured against the fallback-font
+       layout would otherwise stay wrong for the rest of the session, since
+       they're only ever computed once, on first use */
+    document.fonts.ready.then(() => {
+      if (this.targets) this._recalcAnchors()
+    })
   }
 
   updateScroll(scrollY) {
@@ -391,32 +514,45 @@ class ParticleSystem {
   }
 
   _resolveTargets() {
-    const DESIRED_RADIUS = 3000   /* as slow as the layout allows — auto-capped below */
-
     const raw = PARTICLE_SHAPES
-      .map(s => ({ el: document.querySelector(s.selector), build: s.build, mode: s.mode, positions: null, wantOffset: s.anchorOffset ?? 550 }))
+      .map(s => ({ el: document.querySelector(s.selector), build: s.build, mode: s.mode, sweep: s.sweep, hasVolume: s.hasVolume, plateau: s.plateau ?? 0, positions: null, wantOffset: s.anchorOffset ?? 550 }))
       .filter(t => t.el)
 
+    this.targets = raw
+    this._recalcAnchors()
+  }
+
+  /* (re)computes each target's anchor + auto-capped radius in place, without
+     touching this.targets' array order or any already-built t.positions —
+     safe to call again later (e.g. once fonts have swapped in) without
+     invalidating this.activeIndex, which points into this same array */
+  _recalcAnchors() {
+    const DESIRED_RADIUS = 3000   /* as slow as the layout allows — auto-capped below */
+    const targets = this.targets
+
     /* each target's anchor as an absolute (scroll-independent) document
-       position, so gaps between neighbors can be measured once regardless
-       of declaration order in PARTICLE_SHAPES */
-    raw.forEach(t => {
+       position, so gaps between neighbors can be measured regardless of
+       declaration order in PARTICLE_SHAPES */
+    targets.forEach(t => {
       const rect = t.el.getBoundingClientRect()
       t.anchorOffset = Math.min(t.wantOffset, rect.height * 0.85)
       t.anchorAbsY = window.scrollY + rect.top + t.anchorOffset
     })
-    raw.sort((a, b) => a.anchorAbsY - b.anchorAbsY)
 
     /* cap each target's radius to half the gap to its neighbors (with a
        10% safety margin) so two shapes can never both stay above the
-       swap threshold at once, no matter how large DESIRED_RADIUS is */
-    raw.forEach((t, i) => {
-      const prevGap = i > 0 ? t.anchorAbsY - raw[i - 1].anchorAbsY : Infinity
-      const nextGap = i < raw.length - 1 ? raw[i + 1].anchorAbsY - t.anchorAbsY : Infinity
-      t.radius = Math.min(DESIRED_RADIUS, prevGap / 2, nextGap / 2) * 0.9
+       swap threshold at once, no matter how large DESIRED_RADIUS is — a
+       target with a plateau (a flat fully-solid hold before it starts
+       fading) needs that hold width reserved on top of its own radius, or
+       the neighbor-gap cap below could still let it start dissolving
+       mid-plateau */
+    const sorted = [...targets].sort((a, b) => a.anchorAbsY - b.anchorAbsY)
+    sorted.forEach((t, i) => {
+      const prevGap = i > 0 ? t.anchorAbsY - sorted[i - 1].anchorAbsY : Infinity
+      const nextGap = i < sorted.length - 1 ? sorted[i + 1].anchorAbsY - t.anchorAbsY : Infinity
+      const cap = Math.min(DESIRED_RADIUS, prevGap / 2 - t.plateau, nextGap / 2 - t.plateau)
+      t.radius = Math.max(40, cap * 0.9)
     })
-
-    this.targets = raw
   }
 
   update() {
@@ -445,7 +581,8 @@ class ParticleSystem {
         w = Math.min(enterP, exitP)
       } else {
         const centerY = rect.top + t.anchorOffset
-        const dist = Math.abs(centerY - vh / 2)
+        const rawDist = Math.abs(centerY - vh / 2)
+        const dist = Math.max(0, rawDist - t.plateau)
         w = clamp(1 - dist / t.radius, 0, 1)
       }
       if (w > bestW) { bestW = w; bestIdx = i }
@@ -469,6 +606,15 @@ class ParticleSystem {
       }
       this.geo.attributes.position1.array.set(targetPositions)
       this.geo.attributes.position1.needsUpdate = true
+
+      /* point-size volume cue — only the shapes that build a real map (see
+         magnifierScaleMap) get anything other than the flat default size */
+      if (bestIdx !== -1 && this.targets[bestIdx].hasVolume && magnifierScaleMap) {
+        this.geo.attributes.pointScale1.array.set(magnifierScaleMap)
+      } else {
+        this.geo.attributes.pointScale1.array.fill(1.0)
+      }
+      this.geo.attributes.pointScale1.needsUpdate = true
     }
 
     this.u_progress = this.activeIndex === -1 ? 0 : eased
@@ -480,7 +626,44 @@ class ParticleSystem {
     const settle = this.activeIndex === -1 ? 0 : this.u_progress
     this.mesh.rotation.x = lerp(this.spinX, 0, settle)
     this.mesh.rotation.y = lerp(this.spinY, 0, settle)
+
+    if (this.activeIndex !== -1 && this.targets[this.activeIndex].sweep && compassSweepMeta) {
+      this._applyCompassSweep(this.targets[this.activeIndex])
+    }
   }
+
+  /* rotates the compass's moving leg around the hinge by real trigonometry
+     every frame — a true arc, not a jump between two static poses — driven
+     off the section's own scroll distance rather than u_progress, so it
+     plays out as a distinct beat after the shape has assembled and before
+     it dissolves back into the cloud */
+  _applyCompassSweep(t) {
+    const rect = t.el.getBoundingClientRect()
+    const vh = window.innerHeight
+    const dist = (rect.top + t.anchorOffset) - vh / 2
+
+    /* single one-way ramp — opens once and holds open (no return swing)
+       — then dissolves from that open pose along with the rest of the shape */
+    const SWEEP_START = -20, SWEEP_END = 110
+    const hump = ss(clamp((dist - SWEEP_START) / (SWEEP_END - SWEEP_START), 0, 1))
+    if (hump <= 0) return
+
+    const angle = -(22 * PI / 180) * hump
+    const cos = Math.cos(angle), sin = Math.sin(angle)
+    const { pivot, legMask, basePositions } = compassSweepMeta
+    const arr = this.geo.attributes.position1.array
+
+    for (let i = 0; i < legMask.length; i++) {
+      if (!legMask[i]) continue
+      const bi = i * 3
+      const lx = basePositions[bi]     - pivot.x
+      const ly = basePositions[bi + 1] - pivot.y
+      arr[bi]     = pivot.x + lx * cos - ly * sin
+      arr[bi + 1] = pivot.y + lx * sin + ly * cos
+    }
+    this.geo.attributes.position1.needsUpdate = true
+  }
+
 }
 
 // ─── WORKS CUBE ───────────────────────────────────────────────────────────────
@@ -1189,22 +1372,30 @@ function initTopicsAccordion() {
 
 // ─── FADE-UP ANIMATION ────────────────────────────────────────────────────────
 
+/* continuous scroll-linked focus: each element is only at full clarity while
+   it's near the vertical center of the viewport, and dims/blurs as it moves
+   away either direction — instead of the old "fades in once, stays forever"
+   behavior, which let several paragraphs sit at full opacity simultaneously
+   and compete for attention */
 function initFadeUp() {
-  const els = document.querySelectorAll('[data-fade-up]')
-  if (!els.length) return
-  const obs = new IntersectionObserver(entries => {
-    entries.forEach(e => {
-      if (!e.isIntersecting) return
-      e.target.classList.add('is-visible')
-      obs.unobserve(e.target)
-    })
-  }, { threshold: 0.12 })
-  els.forEach((el, i) => {
-    const siblings = Array.from(el.parentElement.querySelectorAll('[data-fade-up]'))
-    const idx = siblings.indexOf(el)
-    el.style.transitionDelay = `${idx * 0.11}s`
-    obs.observe(el)
-  })
+  const els = Array.from(document.querySelectorAll('[data-fade-up]'))
+  if (!els.length) return () => {}
+
+  return () => {
+    const vh = window.innerHeight
+    for (const el of els) {
+      const rect = el.getBoundingClientRect()
+      if (rect.bottom < -200 || rect.top > vh + 200) continue   /* skip far-offscreen elements */
+      const centerY = rect.top + rect.height / 2
+      const dist = centerY - vh / 2
+      const range = vh * 0.42
+      const weight = clamp(1 - Math.abs(dist) / range, 0, 1)
+      const eased = ss(weight)
+      el.style.opacity   = eased
+      el.style.filter    = `blur(${(1 - eased) * 9}px)`
+      el.style.transform = `translateY(${dist * 0.06}px)`
+    }
+  }
 }
 
 // ─── QUIZ ─────────────────────────────────────────────────────────────────────
@@ -1330,7 +1521,7 @@ class App {
 
     // Init UI features first
     initLetterAnimation()
-    initFadeUp()
+    this._updateFadeUp = initFadeUp()
     initQuiz()
     initServiceAccordion()
     initFaqAccordion()
@@ -1444,6 +1635,9 @@ class App {
 
     // Main particle background
     if (this.mainScene) this.mainScene.update(dt)
+
+    // Scroll-linked paragraph focus
+    if (this._updateFadeUp) this._updateFadeUp()
 
     // Ring scene
     const darkSec = this.darkSection

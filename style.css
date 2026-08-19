@@ -1287,17 +1287,13 @@ header.header-hidden {
 }
 @media (max-width: 768px) { .faq-ans-inner p { font-size: 13px; } }
 
-/* ─── FADE-UP ENTRANCE ───────────────────────────────── */
+/* ─── FADE-UP FOCUS ──────────────────────────────────── */
+/* opacity/blur/transform are driven every frame from JS (continuous
+   scroll-linked focus) — this is just the pre-JS fallback state */
 [data-fade-up] {
   opacity: 0;
   transform: translateY(22px);
   filter: blur(9px);
-  transition: opacity 0.9s ease, transform 0.9s ease, filter 0.9s ease;
-}
-[data-fade-up].is-visible {
-  opacity: 1;
-  transform: translateY(0);
-  filter: blur(0);
 }
 
 /* ─── FOOTER ─────────────────────────────────────────── */
