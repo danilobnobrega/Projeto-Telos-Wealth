@@ -34,6 +34,146 @@ function createChaosAttractorPositions(scale, count, offset, a, b, c, d, e, f) {
   return result
 }
 
+// ─── SILHOUETTE → PARTICLE CLOUD ──────────────────────────────────────────────
+// draws an icon onto an offscreen canvas, then samples its filled pixels into
+// a 3D point cloud in the same coordinate scale as the chaos attractors above
+
+function silhouettePositions(drawFn, count, worldSize, depthJitter, xOffset = 0) {
+  const RES = 512
+  const cv = document.createElement('canvas')
+  cv.width = RES; cv.height = RES
+  const ctx = cv.getContext('2d')
+  ctx.clearRect(0, 0, RES, RES)
+  drawFn(ctx, RES, RES)
+
+  const img = ctx.getImageData(0, 0, RES, RES).data
+  const filled = []
+  for (let y = 0; y < RES; y++) {
+    for (let x = 0; x < RES; x++) {
+      if (img[(y * RES + x) * 4 + 3] > 40) filled.push(x, y)
+    }
+  }
+
+  const result = new Float32Array(count * 3)
+  const half = worldSize / 2
+  for (let i = 0; i < count; i++) {
+    const idx = (Math.random() * (filled.length / 2) | 0) * 2
+    const px = filled[idx], py = filled[idx + 1]
+    const jx = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+    const jy = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+    result[i * 3]     = (px / RES) * worldSize - half + jx + xOffset
+    result[i * 3 + 1] = -((py / RES) * worldSize - half) + jy
+    result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
+  }
+  return result
+}
+
+/* pushes every particle away from center along its own existing direction —
+   the ambient cloud "flees" outward off-screen rather than assembling into
+   a new shape */
+function fleePositions(restPositions, edgeX) {
+  const result = new Float32Array(restPositions.length)
+  const pointCount = restPositions.length / 3
+  for (let i = 0; i < pointCount; i++) {
+    const ix = i * 3
+    const goRight = i % 2 === 0
+    /* fully independent random scatter around each edge — not derived from
+       the strange attractor's own Y/Z, which has thin curved filaments
+       baked into it and would carry that "line" look into the cluster */
+    const x = edgeX * (goRight ? 1 : -1) + (Math.random() - 0.5) * edgeX * 0.35
+    const y = (Math.random() - 0.5) * 520
+    const z = (Math.random() - 0.5) * 250
+    result[ix]     = x
+    result[ix + 1] = y
+    result[ix + 2] = z
+  }
+  return result
+}
+
+function drawScaleIcon(ctx, W, H) {
+  ctx.fillStyle = '#fff'
+  ctx.strokeStyle = '#fff'
+  const cx = W / 2
+  const armY = H * 0.22
+
+  /* vertical stem */
+  ctx.fillRect(cx - 7, armY, 14, H * 0.56)
+  /* beam */
+  ctx.fillRect(W * 0.16, armY - 6, W * 0.68, 12)
+  /* base */
+  ctx.beginPath()
+  ctx.moveTo(cx - 80, H * 0.88)
+  ctx.lineTo(cx + 80, H * 0.88)
+  ctx.lineTo(cx, H * 0.78)
+  ctx.closePath()
+  ctx.fill()
+
+  /* two hanging pans */
+  const leftX = W * 0.16, rightX = W * 0.84
+  ;[leftX, rightX].forEach(x => {
+    ctx.lineWidth = 7
+    ctx.beginPath(); ctx.moveTo(x - 34, armY); ctx.lineTo(x, armY + 95); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(x + 34, armY); ctx.lineTo(x, armY + 95); ctx.stroke()
+    ctx.lineWidth = 10
+    ctx.beginPath()
+    ctx.ellipse(x, armY + 95, 58, 20, 0, 0, PI)
+    ctx.stroke()
+  })
+}
+
+function drawShieldIcon(ctx, W, H) {
+  ctx.fillStyle = '#fff'
+  const cx = W / 2
+  const top = H * 0.14, bottom = H * 0.88
+  const hw = W * 0.30
+  const midY = (top + bottom) / 2
+  ctx.beginPath()
+  ctx.moveTo(cx, top)
+  ctx.bezierCurveTo(cx + hw, top, cx + hw, top + (bottom - top) * 0.15, cx + hw, midY)
+  ctx.bezierCurveTo(cx + hw, bottom - (bottom - top) * 0.12, cx + hw * 0.5, bottom - 24, cx, bottom)
+  ctx.bezierCurveTo(cx - hw * 0.5, bottom - 24, cx - hw, bottom - (bottom - top) * 0.12, cx - hw, midY)
+  ctx.bezierCurveTo(cx - hw, top + (bottom - top) * 0.15, cx - hw, top, cx, top)
+  ctx.closePath()
+  ctx.fill()
+}
+
+function drawTreeIcon(ctx, W, H) {
+  ctx.fillStyle = '#fff'
+  ctx.strokeStyle = '#fff'
+  const cx = W / 2
+  const groundY = H * 0.62
+
+  /* trunk — tapered, wider at the base */
+  ctx.beginPath()
+  ctx.moveTo(cx - 8, H * 0.30)
+  ctx.lineTo(cx + 8, H * 0.30)
+  ctx.lineTo(cx + 18, groundY)
+  ctx.lineTo(cx - 18, groundY)
+  ctx.closePath()
+  ctx.fill()
+
+  /* canopy — cluster of overlapping blobs */
+  const canopy = [
+    [cx, H * 0.20, 62], [cx - 55, H * 0.30, 50], [cx + 55, H * 0.30, 50],
+    [cx - 30, H * 0.14, 42], [cx + 30, H * 0.14, 42], [cx, H * 0.34, 55],
+  ]
+  canopy.forEach(([x, y, r]) => {
+    ctx.beginPath()
+    ctx.arc(x, y, r, 0, PI * 2)
+    ctx.fill()
+  })
+
+  /* roots — diverging lines below the trunk */
+  ctx.lineWidth = 6
+  const rootSpread = [-70, -35, 0, 35, 70]
+  rootSpread.forEach(dx => {
+    ctx.beginPath()
+    ctx.moveTo(cx, groundY - 6)
+    ctx.lineTo(cx + dx, H * 0.86)
+    ctx.stroke()
+  })
+}
+
 // ─── GLSL SHADERS ─────────────────────────────────────────────────────────────
 
 const particleVertexShader = `
@@ -41,7 +181,6 @@ in vec3 position;
 in vec3 position1;
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
-uniform float u_section;
 uniform float u_progress;
 void main() {
   vec3 finalPosition = mix(position, position1, u_progress);
@@ -52,12 +191,15 @@ void main() {
 
 const particleFragmentShader = `
 precision mediump float;
+uniform vec3 u_color;
 out vec4 fragColor;
 void main() {
-  float color = 1.0/255.0 * 204.0;
-  fragColor = vec4(color, color, color, 1.0);
+  fragColor = vec4(u_color, 1.0);
 }
 `
+
+const PARTICLE_COLOR_LIGHT = [0.8, 0.8, 0.8]         /* soft gray, subtle on white */
+const PARTICLE_COLOR_DARK  = [0.30, 0.48, 0.45]      /* muted petrol/teal green, on black */
 
 // ─── MAIN WEBGL SCENE ─────────────────────────────────────────────────────────
 
@@ -130,6 +272,10 @@ class MainScene {
     this.worksCubes.forEach(c => c.reposition(scrollY))
   }
 
+  setBackgroundZoom(weight) {
+    this.particles.setZoom(weight)
+  }
+
   resize() {
     this.width = window.innerWidth
     this.height = window.innerHeight
@@ -151,64 +297,189 @@ class MainScene {
 
 // ─── PARTICLE SYSTEM ──────────────────────────────────────────────────────────
 
+/* sections that pull the background particles into a symbolic shape as they
+   cross the middle of the viewport, dissolving back to the ambient cloud
+   once scrolled past — each entry is resolved lazily once the DOM exists */
+const PARTICLE_SHAPES = [
+  {
+    selector: '.works-section',
+    anchorOffset: 550,   /* a bit lower than the shared default */
+    build: count => silhouettePositions(drawTreeIcon, count, 350, 25, 180),
+  },
+  {
+    selector: '.analise-section',
+    build: count => createChaosAttractorPositions(
+      900, count, 400,
+      -0.9177339853982867, 1.5409458316723406,
+      2.279682707438794, 1.3641950476985585,
+      1.9459875364821286, -0.20186017310569326
+    ),
+  },
+  {
+    selector: '.processo-section',
+    anchorOffset: 450,   /* a bit higher than the shared default */
+    build: count => silhouettePositions(drawScaleIcon, count, 350, 25, 180),
+  },
+  {
+    selector: '.feeonly-section',
+    anchorOffset: 370,   /* a bit higher than the shared default */
+    build: count => silhouettePositions(drawShieldIcon, count, 350, 25, 180),
+  },
+  {
+    selector: '.dark-section',
+    mode: 'enterExit',   /* huge sticky section — hold the flee for its entire length */
+    build: (count, restPositions) => fleePositions(restPositions, 500),
+  },
+]
+
 class ParticleSystem {
   constructor(scene) {
     this.scene = scene
     this.pointCount = 180000
-    this.u_section = 0
     this.u_progress = 0
     this.smoothScrollY = 0
-    this.triggerEl = null
+    this.targets = null       /* resolved lazily once sections exist in the DOM */
+    this.activeIndex = -1     /* -1 = resting cloud, no section in focus */
+    this.hasSynced = false    /* first frame syncs immediately, ignoring the swap guard */
+    this.spinX = 0
+    this.spinY = 0
+    this.zoomWeight = 0
     this._build()
   }
 
   _build() {
-    const posA = createChaosAttractorPositions(
+    const restPositions = createChaosAttractorPositions(
       900, this.pointCount, -400,
       -1.3388143922812512, -2.564831973745868,
       -2.527437970803663, 1.8141623559217095,
       3.542189950007197, 0.31078571067456906
     )
-    const posB = createChaosAttractorPositions(
-      900, this.pointCount, 400,
-      -0.9177339853982867, 1.5409458316723406,
-      2.279682707438794, 1.3641950476985585,
-      1.9459875364821286, -0.20186017310569326
-    )
+    this.restPositions = restPositions
+
     const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(posA, 3))
-    geo.setAttribute('position1', new THREE.BufferAttribute(posB, 3))
+    geo.setAttribute('position', new THREE.BufferAttribute(restPositions, 3))
+    geo.setAttribute('position1', new THREE.BufferAttribute(restPositions.slice(), 3))
+    this.geo = geo
+
+    const isDark = document.documentElement.dataset.theme === 'dark'
+    const startColor = isDark ? PARTICLE_COLOR_DARK : PARTICLE_COLOR_LIGHT
+
     this.material = new THREE.RawShaderMaterial({
       vertexShader: particleVertexShader,
       fragmentShader: particleFragmentShader,
       glslVersion: THREE.GLSL3,
       uniforms: {
-        u_section: { value: this.u_section },
-        u_progress: { value: this.u_progress }
+        u_progress: { value: this.u_progress },
+        u_color:    { value: new THREE.Vector3(...startColor) },
       }
     })
     this.mesh = new THREE.Points(geo, this.material)
     this.scene.add(this.mesh)
+
+    window.addEventListener('themechange', e => {
+      const c = e.detail.theme === 'dark' ? PARTICLE_COLOR_DARK : PARTICLE_COLOR_LIGHT
+      this.material.uniforms.u_color.value.set(...c)
+    })
   }
 
   updateScroll(scrollY) {
     this.smoothScrollY = scrollY
   }
 
+  setZoom(weight) {
+    this.zoomWeight = weight
+  }
+
+  _resolveTargets() {
+    const DESIRED_RADIUS = 3000   /* as slow as the layout allows — auto-capped below */
+
+    const raw = PARTICLE_SHAPES
+      .map(s => ({ el: document.querySelector(s.selector), build: s.build, mode: s.mode, positions: null, wantOffset: s.anchorOffset ?? 550 }))
+      .filter(t => t.el)
+
+    /* each target's anchor as an absolute (scroll-independent) document
+       position, so gaps between neighbors can be measured once regardless
+       of declaration order in PARTICLE_SHAPES */
+    raw.forEach(t => {
+      const rect = t.el.getBoundingClientRect()
+      t.anchorOffset = Math.min(t.wantOffset, rect.height * 0.85)
+      t.anchorAbsY = window.scrollY + rect.top + t.anchorOffset
+    })
+    raw.sort((a, b) => a.anchorAbsY - b.anchorAbsY)
+
+    /* cap each target's radius to half the gap to its neighbors (with a
+       10% safety margin) so two shapes can never both stay above the
+       swap threshold at once, no matter how large DESIRED_RADIUS is */
+    raw.forEach((t, i) => {
+      const prevGap = i > 0 ? t.anchorAbsY - raw[i - 1].anchorAbsY : Infinity
+      const nextGap = i < raw.length - 1 ? raw[i + 1].anchorAbsY - t.anchorAbsY : Infinity
+      t.radius = Math.min(DESIRED_RADIUS, prevGap / 2, nextGap / 2) * 0.9
+    })
+
+    this.targets = raw
+  }
+
   update() {
-    this.mesh.rotation.x += PI / 180 / 30
-    this.mesh.rotation.y += PI / 180 / 30
+    this.spinX = (this.spinX + PI / 180 / 30) % (2 * PI)
+    this.spinY = (this.spinY + PI / 180 / 30) % (2 * PI)
     this.mesh.position.y = -this.smoothScrollY
 
-    if (!this.analiseEl) {
-      this.analiseEl = document.querySelector('.analise-section')
+    /* zoom in lockstep with the ring — pushes edge-parked particles out of
+       frame for real, instead of them sitting static while the ring (a
+       completely separate scene/camera) zooms on its own */
+    const zoomScale = lerp(1, 3.5, this.zoomWeight || 0)
+    this.mesh.scale.setScalar(zoomScale)
+
+    if (!this.targets) this._resolveTargets()
+
+    const vh = window.innerHeight
+    let bestW = 0, bestIdx = -1
+    this.targets.forEach((t, i) => {
+      const rect = t.el.getBoundingClientRect()
+      let w
+      if (t.mode === 'enterExit') {
+        /* huge sticky section — rise once as it's approached, hold for its
+           entire (very long) length, fall once as it's finally left behind */
+        const enterP = clamp((vh * 0.8 - rect.top) / (vh * 0.8), 0, 1)
+        const exitP  = rect.bottom < vh * 0.3 ? clamp(rect.bottom / (vh * 0.3), 0, 1) : 1
+        w = Math.min(enterP, exitP)
+      } else {
+        const centerY = rect.top + t.anchorOffset
+        const dist = Math.abs(centerY - vh / 2)
+        w = clamp(1 - dist / t.radius, 0, 1)
+      }
+      if (w > bestW) { bestW = w; bestIdx = i }
+    })
+
+    const eased = ss(bestW)
+    const firstFrame = !this.hasSynced
+    this.hasSynced = true
+
+    /* only swap the target buffer while the blend is essentially at rest,
+       so switching from one section's shape to the next never pops — except
+       on the very first frame, which must sync immediately to wherever the
+       page happens to load/refresh (there's no prior shape to protect) */
+    if (bestIdx !== this.activeIndex && (eased < 0.05 || firstFrame)) {
+      this.activeIndex = bestIdx
+      let targetPositions = this.restPositions
+      if (bestIdx !== -1) {
+        const t = this.targets[bestIdx]
+        if (!t.positions) t.positions = t.build(this.pointCount, this.restPositions)
+        targetPositions = t.positions
+      }
+      this.geo.attributes.position1.array.set(targetPositions)
+      this.geo.attributes.position1.needsUpdate = true
     }
-    if (this.analiseEl) {
-      const top = this.analiseEl.getBoundingClientRect().top
-      const vh  = window.innerHeight
-      this.u_progress = clamp((vh + 700 - top) / 700, 0, 1)
-      this.material.uniforms.u_progress.value = this.u_progress
-    }
+
+    this.u_progress = this.activeIndex === -1 ? 0 : eased
+    this.material.uniforms.u_progress.value = this.u_progress
+
+    /* settle upright as a shape assembles — nobody can read a tree or a
+       scale that's sideways or upside down; resume free spin once it
+       dissolves back into the ambient cloud */
+    const settle = this.activeIndex === -1 ? 0 : this.u_progress
+    this.mesh.rotation.x = lerp(this.spinX, 0, settle)
+    this.mesh.rotation.y = lerp(this.spinY, 0, settle)
   }
 }
 
@@ -334,11 +605,12 @@ class RingScene {
     this.mouseScreenX = 9999
     this.mouseScreenY = 9999
     this.linkedinTargets = []
+    this.zoomP1 = 0
+    this.zoomP3 = 0
 
     this._setup()
     this._buildCards()
     this._refreshBounds()
-    this._watchSection()
     this._initLinkedInClicks()
 
     window.addEventListener('mousemove', e => {
@@ -649,16 +921,6 @@ class RingScene {
     return best
   }
 
-  _watchSection() {
-    new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting && this.T0 === null) {
-        this.T0 = performance.now()
-        /* exact same 80ms stagger as inkwell */
-        this.cards.forEach((c, i) => { c.fadeStart = this.T0 + i * 80 })
-      }
-    }, { threshold: 0.05 }).observe(this.sectionEl)
-  }
-
   /* sineInOut — same as inkwell proximity hover */
   _sineInOut(x) { return -(Math.cos(PI * x) - 1) / 2 }
 
@@ -713,6 +975,14 @@ class RingScene {
 
   updateScroll(scrollY) {
     this.localScrollY = clamp(scrollY - this.sectionTop, 0, this.scrollRange)
+
+    /* the ring only starts forming once the section has actually been
+       scrolled into its pinned position — which happens to be the exact
+       same moment the background particle columns finish assembling */
+    if (this.localScrollY > 0 && this.T0 === null) {
+      this.T0 = performance.now()
+      this.cards.forEach((c, i) => { c.fadeStart = this.T0 + i * 200 })
+    }
   }
 
   resize() {
@@ -752,8 +1022,8 @@ class RingScene {
     const t = now - this.T0
 
     /* exact same timing as inkwell */
-    const toLine = ss(clamp((t - 2200) / 1600, 0, 1))
-    const toRing = ss(clamp((t - 4200) / 1800, 0, 1))
+    const toLine = ss(clamp((t - 1700) / 1300, 0, 1))
+    const toRing = ss(clamp((t - 3200) / 1400, 0, 1))
 
     this.cardGroup.rotation.y = 0
 
@@ -764,6 +1034,10 @@ class RingScene {
     const p1 = ss(p1raw)
     const p2 = ss(p2raw)
     const p3 = ss(p3raw)
+    /* exposed so the background particle camera can zoom in lockstep with
+       the ring instead of sitting as a totally separate, static layer */
+    this.zoomP1 = p1
+    this.zoomP3 = p3
 
     /* ── per-card spring + radial rotation — exact same as inkwell ── */
     for (let i = 0; i < this.cards.length; i++) {
@@ -1100,7 +1374,6 @@ class App {
     }
 
     this.darkSection = darkSection
-    this.darkOverlay = document.getElementById('dark-overlay')
 
     // Header hide-on-scroll-down / show-on-scroll-up
     this.header = document.querySelector('header')
@@ -1172,7 +1445,7 @@ class App {
     // Main particle background
     if (this.mainScene) this.mainScene.update(dt)
 
-    // Ring scene + dark overlay (scroll-driven opacity)
+    // Ring scene
     const darkSec = this.darkSection
     if (darkSec) {
       const rect = darkSec.getBoundingClientRect()
@@ -1182,12 +1455,12 @@ class App {
         this.ringScene.update()
       }
 
-      if (this.darkOverlay) {
-        // Fade in: rect.top de vh*0.8 → 0  (entrada suave antes do sticky ativar)
-        // Fade out: rect.bottom de vh*0.3 → 0  (saída suave ao fim da seção)
-        const enterP = clamp((vh * 0.8 - rect.top) / (vh * 0.8), 0, 1)
-        const exitP  = rect.bottom < vh * 0.3 ? clamp(rect.bottom / (vh * 0.3), 0, 1) : 1
-        this.darkOverlay.style.opacity = Math.min(enterP, exitP)
+      /* the background particles zoom in lockstep with the ring, so the
+         ones parked at the screen edges get pushed out of frame for real
+         instead of just sitting there while the ring zooms independently */
+      if (this.ringScene && this.mainScene) {
+        const zoomWeight = this.ringScene.zoomP1 * (1 - this.ringScene.zoomP3)
+        this.mainScene.setBackgroundZoom(zoomWeight)
       }
     }
   }

@@ -341,8 +341,8 @@ header.header-hidden {
 
 /* ─── WORKS ─────────────────────────────────────────── */
 .works-section {
-  padding-top: min(200px, 13.889vw);
-  padding-bottom: min(120px, 8.333vw);
+  padding-top: min(290px, 20.139vw);
+  padding-bottom: min(220px, 15.278vw);
 }
 .works-container {
   width: var(--content-w);
@@ -699,14 +699,6 @@ header.header-hidden {
 }
 
 /* ─── DARK SECTION — ring animation ─────────────────── */
-.dark-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--dark-accent);
-  z-index: 1;
-  opacity: 0;
-  pointer-events: none;
-}
 .dark-section {
   height: calc(100dvh + 4600px);
   position: relative;
@@ -726,7 +718,7 @@ header.header-hidden {
 
 /* ─── PROCESSO ───────────────────────────────────────── */
 .processo-section {
-  padding: min(160px, 11.111vw) 0 0;
+  padding: min(160px, 11.111vw) 0 min(200px, 13.889vw);
   position: relative;
 }
 .processo-container {
@@ -790,7 +782,7 @@ header.header-hidden {
 
 /* ─── FEE-ONLY ───────────────────────────────────────── */
 .feeonly-section {
-  padding: min(160px, 11.111vw) 0 0;
+  padding: min(160px, 11.111vw) 0 min(200px, 13.889vw);
 }
 .feeonly-container {
   width: var(--content-w);
@@ -1298,12 +1290,14 @@ header.header-hidden {
 /* ─── FADE-UP ENTRANCE ───────────────────────────────── */
 [data-fade-up] {
   opacity: 0;
-  transform: translateY(26px);
-  transition: opacity 0.65s ease, transform 0.65s ease;
+  transform: translateY(22px);
+  filter: blur(9px);
+  transition: opacity 0.9s ease, transform 0.9s ease, filter 0.9s ease;
 }
 [data-fade-up].is-visible {
   opacity: 1;
   transform: translateY(0);
+  filter: blur(0);
 }
 
 /* ─── FOOTER ─────────────────────────────────────────── */
