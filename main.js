@@ -90,42 +90,90 @@ function fleePositions(restPositions, edgeX) {
   return result
 }
 
-/* solid crystal dome magnifier — a low, round glass disc (the classic
-   "reading stone"), not a rectangular block or a handled lens: a flattened
-   ellipse with a concentric rim groove punched through it, the same way
-   the notepad's spiral rings read as gaps rather than a solid blob */
-function drawCrystalMagnifierIcon(ctx, W, H) {
+/* hook with a fish already caught on the barb from the start, plus a few
+   wavy lines below simulating water. hook+fish rise together as one unit;
+   the waves ripple continuously — see buildHookFishPositions/
+   _applyHookFishAction */
+function drawHookFishIcon(ctx, W, H) {
+  ctx.strokeStyle = '#fff'
   ctx.fillStyle = '#fff'
-  const cx = W / 2, cy = H * 0.52
-  const rx = W * 0.34, ry = rx * 0.82   /* low dome profile, not a full sphere */
+  const cx = W * 0.28   /* shifted left of center, leaving room for the fish */
+
+  /* hook: eyelet, shank, bezier bend */
+  ctx.lineWidth = 16
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.arc(cx, H * 0.12, 16, 0, PI * 2)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(cx, H * 0.16)
+  ctx.lineTo(cx, H * 0.55)
+  ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(cx, H * 0.55)
+  ctx.bezierCurveTo(W * 0.14, H * 0.72, W * 0.50, H * 0.76, W * 0.46, H * 0.56)
+  ctx.stroke()
+
+  /* fish caught on the barb from the start */
+  const fishLen = W * 0.37, fishH = W * 0.17
+  const fishCx = W * 0.46 + fishLen * 0.5, fishCy = H * 0.56
 
   ctx.beginPath()
-  ctx.ellipse(cx, cy, rx, ry, 0, 0, PI * 2)
+  ctx.moveTo(fishCx - fishLen * 0.5, fishCy)
+  ctx.bezierCurveTo(
+    fishCx - fishLen * 0.2, fishCy - fishH,
+    fishCx + fishLen * 0.35, fishCy - fishH * 0.5,
+    fishCx + fishLen * 0.5, fishCy
+  )
+  ctx.bezierCurveTo(
+    fishCx + fishLen * 0.35, fishCy + fishH * 0.5,
+    fishCx - fishLen * 0.2, fishCy + fishH,
+    fishCx - fishLen * 0.5, fishCy
+  )
+  ctx.closePath()
   ctx.fill()
 
-  ctx.globalCompositeOperation = 'destination-out'
-  ctx.lineWidth = 9
   ctx.beginPath()
-  ctx.ellipse(cx, cy, rx * 0.74, ry * 0.74, 0, 0, PI * 2)
-  ctx.stroke()
+  ctx.moveTo(fishCx + fishLen * 0.48, fishCy)
+  ctx.lineTo(fishCx + fishLen * 0.80, fishCy - fishH * 0.9)
+  ctx.lineTo(fishCx + fishLen * 0.66, fishCy)
+  ctx.lineTo(fishCx + fishLen * 0.80, fishCy + fishH * 0.9)
+  ctx.closePath()
+  ctx.fill()
+
+  /* water — a few wavy lines below/around the catch, spread apart */
+  ctx.lineWidth = 7
+  ctx.lineCap = 'butt'
+  const waveYs = [0.80, 0.97]
+  for (const wy of waveYs) {
+    const baseY = H * wy
+    ctx.beginPath()
+    for (let x = W * 0.05; x <= W * 0.95; x += W * 0.05) {
+      const off = Math.sin((x / W) * PI * 4) * (H * 0.018)
+      if (x === W * 0.05) ctx.moveTo(x, baseY + off)
+      else ctx.lineTo(x, baseY + off)
+    }
+    ctx.stroke()
+  }
 }
 
-/* volume cue for the magnifier: particles near the center of the dome are
-   both pushed toward the camera (real z bulge, hemisphere profile) AND
-   rendered as bigger points — size is what the eye actually reads as depth
-   in a 1px point cloud, brightness alone (tried before) is imperceptible
-   at that scale. scaleMap is read every frame by the swap-guard in
-   update() to populate the pointScale1 attribute. */
-let magnifierScaleMap = null
+/* populated by buildHookFishPositions the first (and only) time it runs.
+   waveMask flags particles below the WAVE_SPLIT_PX line (the two wavy water
+   lines); everything else (hook + fish) is the complementary group that
+   rises together as one rigid unit. read every frame by
+   _applyHookFishAction: the hook+fish group translates straight up, the
+   wave group gets a continuous per-frame ripple. */
+let hookFishMeta = null
 
-function buildMagnifierPositions(count) {
-  const RES = 512, worldSize = 350, xOffset = 180
+function buildHookFishPositions(count) {
+  const RES = 512, worldSize = 350, depthJitter = 25, xOffset = 300
+  const half = worldSize / 2
+
   const cv = document.createElement('canvas')
   cv.width = RES; cv.height = RES
   const ctx = cv.getContext('2d')
   ctx.clearRect(0, 0, RES, RES)
-  drawCrystalMagnifierIcon(ctx, RES, RES)
-
+  drawHookFishIcon(ctx, RES, RES)
   const img = ctx.getImageData(0, 0, RES, RES).data
   const filled = []
   for (let y = 0; y < RES; y++) {
@@ -134,12 +182,9 @@ function buildMagnifierPositions(count) {
     }
   }
 
-  const half = worldSize / 2
+  const WAVE_SPLIT_PX = RES * 0.76   /* below this = water, above = hook+fish */
   const result = new Float32Array(count * 3)
-  const scaleMap = new Float32Array(count).fill(1.0)
-  const domeCx = RES / 2, domeCy = RES * 0.52
-  const domeRx = RES * 0.34, domeRy = domeRx * 0.82
-  const maxBulge = 55
+  const waveMask = new Uint8Array(count)
 
   if (filled.length > 0) {
     for (let i = 0; i < count; i++) {
@@ -149,40 +194,118 @@ function buildMagnifierPositions(count) {
       const jy = (Math.random() - 0.5) * (worldSize / RES) * 1.6
       result[i * 3]     = (px / RES) * worldSize - half + jx + xOffset
       result[i * 3 + 1] = -((py / RES) * worldSize - half) + jy
-
-      const nx = (px - domeCx) / domeRx
-      const ny = (py - domeCy) / domeRy
-      const distNorm = Math.min(1, Math.sqrt(nx * nx + ny * ny))
-      const bulge = Math.sqrt(Math.max(0, 1 - distNorm * distNorm)) * maxBulge
-      result[i * 3 + 2] = bulge + (Math.random() - 0.5) * 10
-      scaleMap[i] = lerp(3.0, 0.9, distNorm)
+      result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
+      waveMask[i] = py > WAVE_SPLIT_PX ? 1 : 0
     }
   } else {
     for (let i = 0; i < count; i++) {
       result[i * 3]     = (Math.random() - 0.5) * worldSize + xOffset
       result[i * 3 + 1] = (Math.random() - 0.5) * worldSize
-      result[i * 3 + 2] = (Math.random() - 0.5) * 25
+      result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
     }
   }
 
-  magnifierScaleMap = scaleMap
+  hookFishMeta = { waveMask, basePositions: result.slice() }
   return result
 }
 
-function drawShieldIcon(ctx, W, H) {
-  ctx.fillStyle = '#fff'
-  const cx = W / 2
-  const top = H * 0.14, bottom = H * 0.88
-  const hw = W * 0.30
-  const midY = (top + bottom) / 2
+/* two kites, drawn independently so their particles can be tagged and swayed
+   out of phase — aligned incentives, both climbing, neither pulling the
+   other off course */
+function drawOneKite(ctx, cx, cy, size) {
   ctx.beginPath()
-  ctx.moveTo(cx, top)
-  ctx.bezierCurveTo(cx + hw, top, cx + hw, top + (bottom - top) * 0.15, cx + hw, midY)
-  ctx.bezierCurveTo(cx + hw, bottom - (bottom - top) * 0.12, cx + hw * 0.5, bottom - 24, cx, bottom)
-  ctx.bezierCurveTo(cx - hw * 0.5, bottom - 24, cx - hw, bottom - (bottom - top) * 0.12, cx - hw, midY)
-  ctx.bezierCurveTo(cx - hw, top + (bottom - top) * 0.15, cx - hw, top, cx, top)
+  ctx.moveTo(cx, cy - size * 0.55)
+  ctx.lineTo(cx + size * 0.38, cy)
+  ctx.lineTo(cx, cy + size * 0.42)
+  ctx.lineTo(cx - size * 0.38, cy)
   ctx.closePath()
   ctx.fill()
+
+  /* tail — many fine segments tracing a real sine wave (not a handful of
+     coarse waypoints, which aliased into a jagged zigzag) */
+  ctx.lineWidth = 5
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(cx, cy + size * 0.42)
+  const tailLen = size * 0.85, N = 24
+  for (let i = 1; i <= N; i++) {
+    const t = i / N
+    const ty = cy + size * 0.42 + t * tailLen
+    const tx = cx + Math.sin(t * PI * 3) * size * 0.16 * t
+    ctx.lineTo(tx, ty)
+  }
+  ctx.stroke()
+}
+
+function drawKitesIcon(ctx, W, H) {
+  ctx.fillStyle = '#fff'
+  ctx.strokeStyle = '#fff'
+  drawOneKite(ctx, W * 0.36, H * 0.72, W * 0.30)
+  drawOneKite(ctx, W * 0.66, H * 0.72, W * 0.26)
+}
+
+/* populated by buildKitesPositions the first (and only) time it runs.
+   kite1Mask/kite2Mask split particles by which kite they came from (simple
+   X threshold — the two kites don't overlap horizontally), so each can
+   sway independently in _applyKitesAction. */
+let kitesMeta = null
+
+function buildKitesPositions(count) {
+  /* RES stays the fraction reference for drawKitesIcon (cx/cy/size are all
+     computed as fractions of RES=512, exactly as before) and for the
+     pixel→world conversion below — but the physical canvas buffer is
+     taller (RES_H) so a low cy plus the tail's own length can extend well
+     past pixel row 512 without being clipped by the canvas edge; the
+     conversion formula only cares about RES, so extra rows below it just
+     extend smoothly into more negative (lower on screen) world Y */
+  const RES = 512, RES_H = 700, worldSize = 350, depthJitter = 25, xOffset = 300
+  const half = worldSize / 2
+
+  const cv = document.createElement('canvas')
+  cv.width = RES; cv.height = RES_H
+  const ctx = cv.getContext('2d')
+  ctx.clearRect(0, 0, RES, RES_H)
+  drawKitesIcon(ctx, RES, RES)
+  const img = ctx.getImageData(0, 0, RES, RES_H).data
+  const filled = []
+  for (let y = 0; y < RES_H; y++) {
+    for (let x = 0; x < RES; x++) {
+      if (img[(y * RES + x) * 4 + 3] > 40) filled.push(x, y)
+    }
+  }
+
+  /* kite1's rightmost point (its diamond's right vertex, ~0.36W+0.114W)
+     and kite2's leftmost point (~0.66W-0.096W) leave a clean gap around
+     0.52W — 0.58 cut directly through kite2's left vertex, splitting a
+     sliver of it into kite1Mask (that sliver then swayed on kite1's phase,
+     reading as a "broken piece" detaching from kite2). */
+  const KITE_SPLIT_PX = RES * 0.52
+  const result = new Float32Array(count * 3)
+  const kite1Mask = new Uint8Array(count)
+  const kite2Mask = new Uint8Array(count)
+
+  if (filled.length > 0) {
+    for (let i = 0; i < count; i++) {
+      const idx = (Math.random() * (filled.length / 2) | 0) * 2
+      const px = filled[idx], py = filled[idx + 1]
+      const jx = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      const jy = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      result[i * 3]     = (px / RES) * worldSize - half + jx + xOffset
+      result[i * 3 + 1] = -((py / RES) * worldSize - half) + jy
+      result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
+      if (px < KITE_SPLIT_PX) kite1Mask[i] = 1
+      else kite2Mask[i] = 1
+    }
+  } else {
+    for (let i = 0; i < count; i++) {
+      result[i * 3]     = (Math.random() - 0.5) * worldSize + xOffset
+      result[i * 3 + 1] = (Math.random() - 0.5) * worldSize
+      result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
+    }
+  }
+
+  kitesMeta = { kite1Mask, kite2Mask, basePositions: result.slice() }
+  return result
 }
 
 function drawCompassIcon(ctx, W, H) {
@@ -226,7 +349,7 @@ function drawCompassIcon(ctx, W, H) {
 let compassSweepMeta = null
 
 function buildCompassPositions(count) {
-  const RES = 512, worldSize = 350, depthJitter = 25, xOffset = 180
+  const RES = 512, worldSize = 350, depthJitter = 25, xOffset = 300
   const cv = document.createElement('canvas')
   cv.width = RES; cv.height = RES
   const ctx = cv.getContext('2d')
@@ -279,22 +402,16 @@ function buildCompassPositions(count) {
 
 // ─── GLSL SHADERS ─────────────────────────────────────────────────────────────
 
-/* pointScale0/pointScale1 default to 1.0 (today's fixed point size) for every
-   shape — only the magnifier's build writes real values into pointScale1
-   (see magnifierScaleMap), so this is invisible everywhere else */
 const particleVertexShader = `
 in vec3 position;
 in vec3 position1;
-in float pointScale0;
-in float pointScale1;
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
 uniform float u_progress;
 void main() {
   vec3 finalPosition = mix(position, position1, u_progress);
-  float pScale = mix(pointScale0, pointScale1, u_progress);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(finalPosition, 1.0);
-  gl_PointSize = pScale;
+  gl_PointSize = 1.0;
 }
 `
 
@@ -307,7 +424,7 @@ void main() {
 }
 `
 
-const PARTICLE_COLOR_LIGHT = [0.8, 0.8, 0.8]         /* soft gray, subtle on white */
+const PARTICLE_COLOR_LIGHT = [0.68, 0.77, 0.76]      /* soft teal-gray, subtle on white — same accent family as dark mode instead of pure neutral gray */
 const PARTICLE_COLOR_DARK  = [0.30, 0.48, 0.45]      /* muted petrol/teal green, on black */
 
 // ─── MAIN WEBGL SCENE ─────────────────────────────────────────────────────────
@@ -318,10 +435,13 @@ class MainScene {
     this.width = window.innerWidth
     this.height = window.innerHeight
     this.scrollY = 0
-    this.mouseX = 0
-    this.mouseY = 0
-    this.targetMouseX = 0
-    this.targetMouseY = 0
+    /* start centered, not (0,0) (top-left) — otherwise the parallax added
+       below normalizes an untouched mouse position to (-1,-1) and the
+       cloud sits tilted to a corner until the user's first mousemove */
+    this.mouseX = this.width / 2
+    this.mouseY = this.height / 2
+    this.targetMouseX = this.width / 2
+    this.targetMouseY = this.height / 2
 
     this._initRenderer()
     this._initCamera()
@@ -398,10 +518,176 @@ class MainScene {
   update(dt) {
     this.mouseX = lerp(this.mouseX, this.targetMouseX, 0.05)
     this.mouseY = lerp(this.mouseY, this.targetMouseY, 0.05)
-    this.particles.update()
+    /* normalized to roughly -1..1 from screen center for the particle
+       parallax in ParticleSystem.update */
+    const mouseNX = clamp((this.mouseX - this.width / 2) / (this.width / 2), -1, 1)
+    const mouseNY = clamp((this.mouseY - this.height / 2) / (this.height / 2), -1, 1)
+    this.particles.update(mouseNX, mouseNY)
     this.worksCubes.forEach(c => c.update(this.scrollY))
     this.renderer.render(this.scene, this.camera)
   }
+}
+
+/* owl modeled on a reference illustration the user provided: dramatic
+   swept, pointed ear-tips flaring out from the top of one continuous
+   silhouette (not small tufts sitting on a separate round body), angled
+   brow cuts over big nearly-touching eyes, a diamond beak between them,
+   and a body that tapers into two separated feet at the bottom. the
+   outline is one smooth closed curve through a set of waypoints (mirrored
+   left/right), traced with quadraticCurveTo through each pair's midpoint —
+   verified with a PowerShell preview using this exact technique (not
+   GDI+'s DrawCurve/AddClosedCurve spline, which reads close in a preview
+   but doesn't match plain canvas curves — see the kite-tail lesson
+   earlier in this file's history) before landing here. eyes/brows/beak
+   are all destination-out cuts into that silhouette, with a pupil
+   re-filled in each eye. no per-frame action — sampled once via the
+   generic silhouettePositions helper. */
+function drawOwlIcon(ctx, W, H) {
+  ctx.fillStyle = '#fff'
+  const cx = W * 0.5
+
+  /* right-half waypoints [dx as fraction of W from center, y as fraction
+     of H]; mirrored (reversed + negated dx) for the left half so the two
+     halves join into one continuous loop */
+  const right = [
+    [0.00, 0.19], [0.30, 0.10], [0.27, 0.27], [0.30, 0.50],
+    [0.24, 0.74], [0.16, 0.84], [0.11, 0.92], [0.05, 0.86], [0.00, 0.84],
+  ]
+  const left = [...right].reverse().map(([dx, y]) => [-dx, y])
+  const pts = right.concat(left).map(([dx, y]) => [cx + dx * W, y * H])
+
+  const n = pts.length
+  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+  const m0 = mid(pts[n - 1], pts[0])
+  ctx.beginPath()
+  ctx.moveTo(m0[0], m0[1])
+  for (let i = 0; i < n; i++) {
+    const m = mid(pts[i], pts[(i + 1) % n])
+    ctx.quadraticCurveTo(pts[i][0], pts[i][1], m[0], m[1])
+  }
+  ctx.closePath()
+  ctx.fill()
+
+  /* eyes, brows and beak are all cut out of the silhouette above */
+  ctx.save()
+  ctx.globalCompositeOperation = 'destination-out'
+
+  const eyeR = W * 0.095
+  const eyeLx = cx - W * 0.135, eyeRx = cx + W * 0.135, eyeY = H * 0.32
+  ctx.beginPath()
+  ctx.arc(eyeLx, eyeY, eyeR, 0, PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(eyeRx, eyeY, eyeR, 0, PI * 2)
+  ctx.fill()
+
+  const brow = sign => {
+    ctx.beginPath()
+    ctx.moveTo(cx + sign * W * 0.24, H * 0.20)
+    ctx.lineTo(cx + sign * W * 0.06, H * 0.235)
+    ctx.lineTo(cx + sign * W * 0.08, H * 0.265)
+    ctx.lineTo(cx + sign * W * 0.24, H * 0.245)
+    ctx.closePath()
+    ctx.fill()
+  }
+  brow(-1)
+  brow(1)
+
+  ctx.beginPath()
+  ctx.moveTo(cx, H * 0.29)
+  ctx.lineTo(cx + W * 0.045, H * 0.335)
+  ctx.lineTo(cx, H * 0.39)
+  ctx.lineTo(cx - W * 0.045, H * 0.335)
+  ctx.closePath()
+  ctx.fill()
+
+  ctx.restore()
+
+  /* pupils re-filled inside the eye holes */
+  ctx.fillStyle = '#fff'
+  const pupR = W * 0.032
+  ctx.beginPath()
+  ctx.arc(eyeLx, eyeY, pupR, 0, PI * 2)
+  ctx.fill()
+  ctx.beginPath()
+  ctx.arc(eyeRx, eyeY, pupR, 0, PI * 2)
+  ctx.fill()
+}
+
+/* populated by buildOwlPositions the first (and only) time it runs.
+   wingLeftMask/wingRightMask flag the outer shoulder-to-lower-body band on
+   each side (the part of the outline standing in for folded wings) — Y
+   is bounded to that band specifically so the classification doesn't also
+   grab the ear tips or the feet, which also poke out past the same X
+   threshold. pivotLeft/pivotRight are the shoulder points those bands
+   rotate around. read every frame by ParticleSystem._applyOwlAction. */
+let owlMeta = null
+
+function buildOwlPositions(count) {
+  const RES = 512, worldSize = 350, depthJitter = 25, xOffset = 300
+  const half = worldSize / 2
+
+  const cv = document.createElement('canvas')
+  cv.width = RES; cv.height = RES
+  const ctx = cv.getContext('2d')
+  ctx.clearRect(0, 0, RES, RES)
+  drawOwlIcon(ctx, RES, RES)
+  const img = ctx.getImageData(0, 0, RES, RES).data
+  const filled = []
+  for (let y = 0; y < RES; y++) {
+    for (let x = 0; x < RES; x++) {
+      if (img[(y * RES + x) * 4 + 3] > 40) filled.push(x, y)
+    }
+  }
+
+  const cxPx = RES * 0.5
+  const WING_BAND_X = RES * 0.20
+  /* the eyes sit at y=0.32, spanning roughly 0.225-0.415 — Y_LO must clear
+     that range with margin, or the cheek silhouette right beside the eye
+     (same height, past the X threshold) gets swept into the wing mask and
+     rotates away with it, reading as "a piece of the eye becoming a wing" */
+  const WING_BAND_Y_LO = RES * 0.44, WING_BAND_Y_HI = RES * 0.78
+
+  const result = new Float32Array(count * 3)
+  const wingLeftMask = new Uint8Array(count)
+  const wingRightMask = new Uint8Array(count)
+
+  if (filled.length > 0) {
+    for (let i = 0; i < count; i++) {
+      const idx = (Math.random() * (filled.length / 2) | 0) * 2
+      const px = filled[idx], py = filled[idx + 1]
+      const jx = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      const jy = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      result[i * 3]     = (px / RES) * worldSize - half + jx + xOffset
+      result[i * 3 + 1] = -((py / RES) * worldSize - half) + jy
+      result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
+
+      if (py > WING_BAND_Y_LO && py < WING_BAND_Y_HI) {
+        const dx = px - cxPx
+        if (dx < -WING_BAND_X) wingLeftMask[i] = 1
+        else if (dx > WING_BAND_X) wingRightMask[i] = 1
+      }
+    }
+  } else {
+    for (let i = 0; i < count; i++) {
+      result[i * 3]     = (Math.random() - 0.5) * worldSize + xOffset
+      result[i * 3 + 1] = (Math.random() - 0.5) * worldSize
+      result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
+    }
+  }
+
+  const pivotFromPx = (px, py) => ({
+    x: (px / RES) * worldSize - half + xOffset,
+    y: -((py / RES) * worldSize - half),
+  })
+
+  owlMeta = {
+    wingLeftMask, wingRightMask,
+    pivotLeft:  pivotFromPx(cxPx - RES * 0.20, RES * 0.42),
+    pivotRight: pivotFromPx(cxPx + RES * 0.20, RES * 0.42),
+    basePositions: result.slice(),
+  }
+  return result
 }
 
 // ─── PARTICLE SYSTEM ──────────────────────────────────────────────────────────
@@ -429,13 +715,22 @@ const PARTICLE_SHAPES = [
   {
     selector: '.processo-section',
     anchorOffset: 450,   /* a bit higher than the shared default */
-    build: count => buildMagnifierPositions(count),
-    hasVolume: true,   /* bigger + closer at the center, smaller + flatter at the rim */
+    build: count => buildHookFishPositions(count),
+    hookFishAction: true,   /* hook+fish rise together; the water ripples continuously */
+    plateau: 100,
   },
   {
     selector: '.feeonly-section',
     anchorOffset: 370,   /* a bit higher than the shared default */
-    build: count => silhouettePositions(drawShieldIcon, count, 350, 25, 180),
+    build: count => buildKitesPositions(count),
+    kitesAction: true,   /* both climb continuously, swaying independently on X */
+    plateau: 120,        /* hold fully solid so the sway/rise reads clearly instead of hiding inside the form/dissolve transition */
+  },
+  {
+    selector: '.time-section',
+    build: count => buildOwlPositions(count),
+    owlAction: true,   /* forms with wings closed, opens then closes them once with scroll, before dissolving */
+    plateau: 100,      /* hold the fully-landed pose for a stretch instead of it being a single instantaneous peak */
   },
   {
     selector: '.dark-section',
@@ -471,9 +766,6 @@ class ParticleSystem {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(restPositions, 3))
     geo.setAttribute('position1', new THREE.BufferAttribute(restPositions.slice(), 3))
-    const neutralScale = new Float32Array(this.pointCount).fill(1.0)
-    geo.setAttribute('pointScale0', new THREE.BufferAttribute(neutralScale, 1))
-    geo.setAttribute('pointScale1', new THREE.BufferAttribute(neutralScale.slice(), 1))
     this.geo = geo
 
     const isDark = document.documentElement.dataset.theme === 'dark'
@@ -515,7 +807,7 @@ class ParticleSystem {
 
   _resolveTargets() {
     const raw = PARTICLE_SHAPES
-      .map(s => ({ el: document.querySelector(s.selector), build: s.build, mode: s.mode, sweep: s.sweep, hasVolume: s.hasVolume, plateau: s.plateau ?? 0, positions: null, wantOffset: s.anchorOffset ?? 550 }))
+      .map(s => ({ el: document.querySelector(s.selector), build: s.build, mode: s.mode, sweep: s.sweep, hookFishAction: s.hookFishAction, kitesAction: s.kitesAction, owlAction: s.owlAction, plateau: s.plateau ?? 0, positions: null, wantOffset: s.anchorOffset ?? 550 }))
       .filter(t => t.el)
 
     this.targets = raw
@@ -555,10 +847,12 @@ class ParticleSystem {
     })
   }
 
-  update() {
+  update(mouseNX = 0, mouseNY = 0) {
     this.spinX = (this.spinX + PI / 180 / 30) % (2 * PI)
     this.spinY = (this.spinY + PI / 180 / 30) % (2 * PI)
     this.mesh.position.y = -this.smoothScrollY
+    this.mouseNX = mouseNX
+    this.mouseNY = mouseNY
 
     /* zoom in lockstep with the ring — pushes edge-parked particles out of
        frame for real, instead of them sitting static while the ring (a
@@ -570,6 +864,7 @@ class ParticleSystem {
 
     const vh = window.innerHeight
     let bestW = 0, bestIdx = -1
+    const weights = new Array(this.targets.length)
     this.targets.forEach((t, i) => {
       const rect = t.el.getBoundingClientRect()
       let w
@@ -585,12 +880,28 @@ class ParticleSystem {
         const dist = Math.max(0, rawDist - t.plateau)
         w = clamp(1 - dist / t.radius, 0, 1)
       }
+      weights[i] = w
       if (w > bestW) { bestW = w; bestIdx = i }
     })
 
-    const eased = ss(bestW)
     const firstFrame = !this.hasSynced
     this.hasSynced = true
+
+    /* eased must reflect how well the shape CURRENTLY LOADED in position1
+       (this.activeIndex) matches the scroll position — not whichever
+       target happens to be the best match this frame. those are usually
+       the same thing, but a fast scroll/fling can jump bestIdx straight
+       to a non-neighboring section while its weight is already high,
+       before the swap below ever gets a low-eased window to fire in. use
+       bestW there and the old shape stays loaded (never swaps) while
+       u_progress reports the NEW section's high weight — the wrong shape
+       renders fully formed in the new section's spot. reading the active
+       target's own weight fixes it two ways at once: it reports the
+       correct (usually low, since you scrolled away) opacity for
+       whatever's actually in the buffer, AND that same low value is what
+       lets the swap condition below fire immediately. */
+    const activeW = this.activeIndex === -1 ? 0 : weights[this.activeIndex]
+    const eased = ss(activeW)
 
     /* only swap the target buffer while the blend is essentially at rest,
        so switching from one section's shape to the next never pops — except
@@ -606,18 +917,12 @@ class ParticleSystem {
       }
       this.geo.attributes.position1.array.set(targetPositions)
       this.geo.attributes.position1.needsUpdate = true
-
-      /* point-size volume cue — only the shapes that build a real map (see
-         magnifierScaleMap) get anything other than the flat default size */
-      if (bestIdx !== -1 && this.targets[bestIdx].hasVolume && magnifierScaleMap) {
-        this.geo.attributes.pointScale1.array.set(magnifierScaleMap)
-      } else {
-        this.geo.attributes.pointScale1.array.fill(1.0)
-      }
-      this.geo.attributes.pointScale1.needsUpdate = true
     }
 
-    this.u_progress = this.activeIndex === -1 ? 0 : eased
+    /* activeIndex may have just changed above (to bestIdx) — re-read its
+       weight so u_progress always matches whatever's actually in the
+       buffer now, pre- or post-swap */
+    this.u_progress = this.activeIndex === -1 ? 0 : ss(weights[this.activeIndex])
     this.material.uniforms.u_progress.value = this.u_progress
 
     /* settle upright as a shape assembles — nobody can read a tree or a
@@ -627,8 +932,37 @@ class ParticleSystem {
     this.mesh.rotation.x = lerp(this.spinX, 0, settle)
     this.mesh.rotation.y = lerp(this.spinY, 0, settle)
 
+    /* persistent cursor parallax — mouseX/mouseY were already tracked and
+       smoothed every frame in MainScene but never actually used anywhere
+       until now. layered on top of the spin/settle rotation above rather
+       than replacing it, so the whole cloud (formed shape or ambient
+       drift alike) tilts toward the cursor — the one thing on this page
+       that responds to the user continuously, not just at scroll-triggered
+       set pieces.
+
+       same rotation angle produces a much smaller screen-space swing once
+       a shape is formed — particles sit close to the rotation axis
+       (worldSize=350, ~175 radius) instead of spread out like the ambient
+       rest cloud (chaos-attractor scale=900). compensate by boosting the
+       angle as u_progress climbs — at u_progress=0 (fully dispersed) the
+       boost is exactly 1, so that state is untouched; it only ramps up as
+       the shape compresses. 3 is a starting estimate, not measured against
+       a live render — tune after seeing it. */
+    const parallaxBoost = lerp(1, 3, this.u_progress)
+    this.mesh.rotation.y += this.mouseNX * 0.16 * parallaxBoost
+    this.mesh.rotation.x += -this.mouseNY * 0.16 * parallaxBoost
+
     if (this.activeIndex !== -1 && this.targets[this.activeIndex].sweep && compassSweepMeta) {
       this._applyCompassSweep(this.targets[this.activeIndex])
+    }
+    if (this.activeIndex !== -1 && this.targets[this.activeIndex].hookFishAction && hookFishMeta) {
+      this._applyHookFishAction(this.targets[this.activeIndex])
+    }
+    if (this.activeIndex !== -1 && this.targets[this.activeIndex].kitesAction && kitesMeta) {
+      this._applyKitesAction(this.targets[this.activeIndex])
+    }
+    if (this.activeIndex !== -1 && this.targets[this.activeIndex].owlAction && owlMeta) {
+      this._applyOwlAction(this.targets[this.activeIndex])
     }
   }
 
@@ -664,6 +998,128 @@ class ParticleSystem {
     this.geo.attributes.position1.needsUpdate = true
   }
 
+  /* hook+fish rise together as one unit — a straight vertical translate (no
+     rotation, so no direction ambiguity like the compass/mousetrap needed
+     sign fixes for), single direction, post-formation only (negative dist
+     window — same pattern proven correct there). the water ripples
+     continuously the whole time this shape is active, independent of
+     scroll — a per-frame sine offset driven off elapsed time. */
+  _applyHookFishAction(t) {
+    const rect = t.el.getBoundingClientRect()
+    const vh = window.innerHeight
+    const dist = (rect.top + t.anchorOffset) - vh / 2
+
+    const { waveMask, basePositions } = hookFishMeta
+    const arr = this.geo.attributes.position1.array
+
+    const PULL_START = -15, PULL_END = -90
+    const pullT = ss(clamp((dist - PULL_START) / (PULL_END - PULL_START), 0, 1))
+    const LIFT = 90
+    const rippleTime = performance.now() * 0.0018
+
+    for (let i = 0; i < waveMask.length; i++) {
+      const bi = i * 3
+      if (waveMask[i]) {
+        const ripple = Math.sin(basePositions[bi] * 0.05 + rippleTime) * 6
+        arr[bi + 1] = basePositions[bi + 1] + ripple
+      } else {
+        arr[bi + 1] = basePositions[bi + 1] + LIFT * pullT
+      }
+    }
+    this.geo.attributes.position1.needsUpdate = true
+  }
+
+  /* both kites climb WITH scroll (single direction, post-formation only —
+     same negative-dist-window technique as the hook+fish pull, not an
+     automatic/time-driven rise). the sway is a true ROTATION around each
+     kite's string-attachment point (its top tip), not a uniform X slide —
+     that's what actually reads as "swaying like a kite" instead of
+     "sliding side to side": particles near the pivot barely move while the
+     tail tip (farthest from the pivot) swings through a much wider arc,
+     exactly like a real kite pivoting at the end of its line. each kite's
+     angle sums two out-of-sync sine waves (different, non-harmonic
+     frequencies) so the motion never looks like a mechanical metronome. */
+  _applyKitesAction(t) {
+    const { kite1Mask, kite2Mask, basePositions } = kitesMeta
+    const arr = this.geo.attributes.position1.array
+    const time = performance.now() * 0.001
+
+    const rect = t.el.getBoundingClientRect()
+    const vh = window.innerHeight
+    const dist = (rect.top + t.anchorOffset) - vh / 2
+    /* plateau is 120, so the shape is already 100% formed the instant
+       rawDist drops to 120 — start the rise right there (118, just inside
+       that ceiling) and run it almost to the far edge of that same
+       plateau (-118) — using essentially the whole still-100%-solid
+       window for one long climb */
+    const RISE_START = 118, RISE_END = -118
+    const riseT = ss(clamp((dist - RISE_START) / (RISE_END - RISE_START), 0, 1))
+
+    /* rotation around the string-attachment point (as before — the tail,
+       farthest from the pivot, swings the widest arc, just like a real
+       kite pivoting at the end of its line) but the swing amplitude
+       itself is gust-modulated (a slow secondary sine breathing the
+       amplitude up and down) plus a faster small wobble layered on top —
+       together that reads as wind gusting unevenly rather than a metronome */
+    const sway = (mask, pivot, freq, baseAmp, phase, gustFreq, gustPhase, riseAmount) => {
+      const gust = 0.55 + 0.45 * Math.sin(time * gustFreq + gustPhase)
+      const angle = Math.sin(time * freq + phase) * baseAmp * gust
+                  + Math.sin(time * freq * 2.7 + phase * 1.6) * baseAmp * 0.25
+      const cos = Math.cos(angle), sin = Math.sin(angle)
+      const rise = riseAmount * riseT
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i]) continue
+        const bi = i * 3
+        const lx = basePositions[bi]     - pivot.x
+        const ly = basePositions[bi + 1] - pivot.y
+        arr[bi]     = pivot.x + lx * cos - ly * sin
+        arr[bi + 1] = pivot.y + lx * sin + ly * cos + rise
+      }
+    }
+
+    sway(kite1Mask, { x: 251, y: -19.25 }, 0.5,  0.11,  0,   0.13, 0.4, 320)
+    sway(kite2Mask, { x: 356, y: -26.95 }, 0.44, 0.095, 2.1, 0.11, 2.6, 340)
+    this.geo.attributes.position1.needsUpdate = true
+  }
+
+  /* the owl forms with wings already closed — then, as the user keeps
+     scrolling, she opens them and closes them again once (before the
+     shape dissolves), all in the same post-formation dist window the
+     kites/hook+fish use. openT is a single 0→1→0 hump across that window
+     (sin of a 0→π ramp) instead of a one-way ramp, so it's closed at both
+     ends and fully open only at the midpoint. */
+  _applyOwlAction(t) {
+    const { wingLeftMask, wingRightMask, pivotLeft, pivotRight, basePositions } = owlMeta
+    const arr = this.geo.attributes.position1.array
+
+    const rect = t.el.getBoundingClientRect()
+    const vh = window.innerHeight
+    const dist = (rect.top + t.anchorOffset) - vh / 2
+    /* plateau is 100, so the shape is already 100% solid the instant
+       rawDist drops to 100 — start the open/close hump right at that
+       ceiling (95) and finish it well before the far side of the same
+       plateau (-95) so it plays out while still fully solid */
+    const FOLD_START = 95, FOLD_END = -95
+    const progress = clamp((dist - FOLD_START) / (FOLD_END - FOLD_START), 0, 1)
+    const openT = Math.sin(PI * progress)
+    const spreadAngle = openT * (35 * PI / 180)
+
+    const flap = (mask, pivot, angle) => {
+      const cos = Math.cos(angle), sin = Math.sin(angle)
+      for (let i = 0; i < mask.length; i++) {
+        if (!mask[i]) continue
+        const bi = i * 3
+        const lx = basePositions[bi]     - pivot.x
+        const ly = basePositions[bi + 1] - pivot.y
+        arr[bi]     = pivot.x + lx * cos - ly * sin
+        arr[bi + 1] = pivot.y + lx * sin + ly * cos
+      }
+    }
+
+    flap(wingLeftMask, pivotLeft, -spreadAngle)
+    flap(wingRightMask, pivotRight, spreadAngle)
+    this.geo.attributes.position1.needsUpdate = true
+  }
 }
 
 // ─── WORKS CUBE ───────────────────────────────────────────────────────────────
@@ -1161,10 +1617,25 @@ class RingScene {
 
     /* the ring only starts forming once the section has actually been
        scrolled into its pinned position — which happens to be the exact
-       same moment the background particle columns finish assembling */
+       same moment the background particle columns finish assembling.
+
+       but this fires on EVERY scroll update, section visible or not — on
+       a refresh (or a direct link) that lands already past this section,
+       the browser's own scroll restoration delivers a large localScrollY
+       on the very first reading, which used to start the same multi-second
+       reveal (and the scroll lock riding on it, see App._lockScroll)
+       completely off-screen, trapping scroll on a page the user can't
+       even see playing out. if the first-ever reading is already well
+       past the start of the section, skip the reveal outright — backdate
+       T0 far enough that toLine/toRing both read as already-complete on
+       the very next frame, so ringFormed flips true before the lock ever
+       gets a chance to engage. */
     if (this.localScrollY > 0 && this.T0 === null) {
-      this.T0 = performance.now()
-      this.cards.forEach((c, i) => { c.fadeStart = this.T0 + i * 200 })
+      const startedAlreadyPast = this.localScrollY > 20
+      this.T0 = startedAlreadyPast ? performance.now() - 10000 : performance.now()
+      this.cards.forEach((c, i) => {
+        c.fadeStart = startedAlreadyPast ? this.T0 : this.T0 + i * 200
+      })
     }
   }
 
@@ -1381,9 +1852,15 @@ function initFadeUp() {
   const els = Array.from(document.querySelectorAll('[data-fade-up]'))
   if (!els.length) return () => {}
 
+  /* FAQ section keeps the opacity/translateY reveal but not the blur —
+     precomputed once so the per-frame loop below doesn't need a closest()
+     lookup every tick */
+  const skipBlur = els.map(el => !!el.closest('.faq-section'))
+
   return () => {
     const vh = window.innerHeight
-    for (const el of els) {
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i]
       const rect = el.getBoundingClientRect()
       if (rect.bottom < -200 || rect.top > vh + 200) continue   /* skip far-offscreen elements */
       const centerY = rect.top + rect.height / 2
@@ -1392,7 +1869,7 @@ function initFadeUp() {
       const weight = clamp(1 - Math.abs(dist) / range, 0, 1)
       const eased = ss(weight)
       el.style.opacity   = eased
-      el.style.filter    = `blur(${(1 - eased) * 9}px)`
+      if (!skipBlur[i]) el.style.filter = `blur(${(1 - eased) * 9}px)`
       el.style.transform = `translateY(${dist * 0.06}px)`
     }
   }
@@ -1518,6 +1995,7 @@ class App {
     this.scrollY = 0
     this.raf = null
     this.lastTime = 0
+    this._scrollLocked = false
 
     // Init UI features first
     initLetterAnimation()
@@ -1598,6 +2076,36 @@ class App {
     this._lastScrollY = scroll
   }
 
+  /* freezes scroll for the ring's one-time entrance animation (cards
+     appearing → forming the line → forming the circle). without this, the
+     zoom phases stay mathematically gated behind ringFormed (see
+     RingScene.update — p1/p2/p3 are forced to 0 until then), but
+     localScrollY keeps climbing in the background the whole time the user
+     keeps scrolling through that ~4.6s animation; the instant ringFormed
+     flips true, the zoom snaps straight to wherever that already-advanced
+     scroll position is instead of starting from 0 — exactly the "brusco"
+     jump being fixed here. locking scroll for the animation's duration
+     keeps localScrollY pinned near 0 until it's actually safe to move. */
+  _lockScroll() {
+    this._scrollLocked = true
+    if (this.lenis) this.lenis.stop()
+    else document.body.style.overflow = 'hidden'
+    /* failsafe: the animation this locks for is ~4.6s, so anything still
+       locked well past that is a bug, not the intended wait — never trap
+       the user's scroll indefinitely no matter what went wrong upstream */
+    clearTimeout(this._scrollLockFailsafe)
+    this._scrollLockFailsafe = setTimeout(() => {
+      if (this._scrollLocked) this._unlockScroll()
+    }, 6000)
+  }
+
+  _unlockScroll() {
+    this._scrollLocked = false
+    clearTimeout(this._scrollLockFailsafe)
+    if (this.lenis) this.lenis.start()
+    else document.body.style.overflow = ''
+  }
+
   /* debounce: correct the resting scroll position to the nearest card once
      scrolling actually stops — never intercepts or slows down live scrolling */
   _scheduleSnap() {
@@ -1647,6 +2155,10 @@ class App {
 
       if (this.ringScene && rect.bottom > 0 && rect.top < vh) {
         this.ringScene.update()
+
+        const introPlaying = this.ringScene.T0 !== null && !this.ringScene.ringFormed
+        if (introPlaying && !this._scrollLocked) this._lockScroll()
+        else if (!introPlaying && this._scrollLocked) this._unlockScroll()
       }
 
       /* the background particles zoom in lockstep with the ring, so the

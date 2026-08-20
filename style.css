@@ -7,6 +7,12 @@
   --bg-rgb: 255,255,255;   /* rgb components of --color-bg, for use inside rgba() */
   --dark-accent: #0a1628;   /* footer / ring-section navy in light mode */
   --color-cc: #cccccc;
+  /* same petrol-teal family as the dark-mode background particles
+     (PARTICLE_COLOR_DARK in main.js), pushed a bit more saturated/alive
+     for UI use — the site was otherwise 100% grayscale, no accent color
+     existed anywhere before this */
+  --accent: #2FA894;
+  --accent-rgb: 47,168,148;
   --font-roboto: 'Roboto', sans-serif;
   --font-ibarra: 'Ibarra Real Nova', serif;
   --font-zen: 'Zen Kaku Gothic New', sans-serif;
@@ -20,6 +26,8 @@
   --ink: 255,255,255;
   --bg-rgb: 0,0,0;
   --dark-accent: #161616;   /* graphite accent for footer/ring section, stands out against pure black */
+  --accent: #3FCBAE;        /* a touch brighter than the light-mode accent — needs more luminance to read against pure black */
+  --accent-rgb: 63,203,174;
 }
 
 html { scroll-behavior: auto; }
@@ -30,9 +38,58 @@ body {
   font-family: var(--font-roboto);
   font-weight: 300;
   overflow-x: hidden;
+  counter-reset: section-num;
 }
 
 a { color: inherit; text-decoration: none; }
+
+/* ─── CINEMA FAB ───────────────────────────────────────
+   persistent link to the standalone video-room page (cinema.html) —
+   deliberately its own dark/brass palette regardless of light/dark theme,
+   a small foreshadow of that page's own distinct identity rather than
+   trying to blend into the site's own accent system */
+.cinema-fab {
+  position: fixed;
+  right: min(28px, 2vw);
+  bottom: min(28px, 2vw);
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px 12px 16px;
+  border-radius: 999px;
+  background: #0c0808;
+  border: 1px solid rgba(201, 161, 90, 0.45);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.cinema-fab:hover {
+  border-color: #c9a15a;
+  transform: translateY(-2px);
+}
+.cinema-fab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #c9a15a;
+  color: #0c0808;
+  font-size: 10px;
+}
+.cinema-fab-text {
+  font-family: var(--font-roboto);
+  font-size: 12px;
+  font-weight: 300;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #ece4d8;
+}
+@media (max-width: 640px) {
+  .cinema-fab-text { display: none; }
+  .cinema-fab { padding: 12px; }
+}
 ul { list-style: none; }
 button { background: none; border: none; cursor: pointer; font: inherit; }
 img { display: block; max-width: 100%; }
@@ -46,6 +103,21 @@ img { display: block; max-width: 100%; }
   transition: opacity 0.6s ease, transform 0.6s ease;
 }
 .char.visible { opacity: 1; transform: translateY(0); }
+
+/* hero gets a bigger, softer version of the same reveal — first thing on
+   the page, so it's the one moment worth making heavier than the shared
+   default used everywhere else (nav links, every other section heading) */
+.hero-tagline-jp .char,
+.hero-tagline-en .char {
+  transform: translateY(140%);
+  filter: blur(6px);
+  transition: opacity 0.9s ease, transform 0.9s cubic-bezier(0.16, 1, 0.3, 1), filter 0.9s ease;
+}
+.hero-tagline-jp .char.visible,
+.hero-tagline-en .char.visible {
+  transform: translateY(0);
+  filter: blur(0);
+}
 
 /* ─── WEBGL FIXED ─────────────────────────────────── */
 .webgl-fixed-section {
@@ -165,7 +237,7 @@ header.header-hidden {
   flex-shrink: 0;
   transition: border-color 0.2s ease;
 }
-.theme-toggle:hover { border-color: rgba(var(--ink),0.5); }
+.theme-toggle:hover { border-color: var(--accent); }
 .theme-icon-sun { display: none; }
 .theme-icon-moon { display: block; }
 [data-theme="dark"] .theme-icon-sun { display: block; }
@@ -187,7 +259,7 @@ header.header-hidden {
   display: block;
   position: absolute;
   inset: 0;
-  background: var(--color-text);
+  background: var(--accent);
   transform: translateX(-100%);
   transition: transform 0.4s ease;
 }
@@ -357,6 +429,24 @@ header.header-hidden {
   letter-spacing: -0.02em;
 }
 
+/* recurring section-index number — large enough to actually read as a
+   design element (not a decorative sliver), reusing --accent so the color
+   pass from before finally gets a moment where it's actually visible.
+   plain document flow (no absolute positioning) so it can't overlap or
+   overflow anything unpredictably without a live preview to check against. */
+.works-heading::before,
+.section-heading::before {
+  counter-increment: section-num;
+  content: counter(section-num, decimal-leading-zero);
+  display: block;
+  color: var(--accent);
+  font-family: var(--font-roboto);
+  font-size: min(28px, 1.944vw);
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  margin-bottom: min(16px, 1.111vw);
+}
+
 .works-body {
   display: flex;
   flex-direction: column;
@@ -420,7 +510,7 @@ header.header-hidden {
   display: block;
   position: absolute;
   inset: 0;
-  background: var(--color-text);
+  background: var(--accent);
   transform: translateX(-100%);
   transition: transform 0.4s ease;
 }
@@ -971,7 +1061,7 @@ header.header-hidden {
 .quiz-opt:hover { color: var(--color-text); }
 .quiz-opt:hover::before { border-color: rgba(var(--ink),0.5); }
 .quiz-opt.selected { color: var(--color-text); padding-left: 2px; }
-.quiz-opt.selected::before { background: var(--color-text); border-color: var(--color-text); }
+.quiz-opt.selected::before { background: var(--accent); border-color: var(--accent); }
 .quiz-result { max-width: min(580px, 45vw); }
 @media (max-width: 900px) { .quiz-result { max-width: 100%; } }
 .quiz-result-tag {
@@ -1050,6 +1140,17 @@ header.header-hidden {
   font-weight: 300;
   letter-spacing: -0.02em;
   margin-bottom: min(80px, 5.556vw);
+  position: relative;
+  padding-top: min(24px, 1.667vw);
+}
+.section-heading-sm::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: min(40px, 2.778vw);
+  height: 3px;
+  background: var(--accent);
 }
 .member-table { }
 .member-row {
@@ -1269,7 +1370,7 @@ header.header-hidden {
   transition: transform 0.3s ease;
   line-height: 1;
 }
-.faq-item.open .faq-icon { transform: rotate(45deg); }
+.faq-item.open .faq-icon { transform: rotate(45deg); color: var(--accent); }
 .faq-ans {
   display: grid;
   grid-template-rows: 0fr;
@@ -1294,6 +1395,12 @@ header.header-hidden {
   opacity: 0;
   transform: translateY(22px);
   filter: blur(9px);
+}
+/* FAQ opts out of the blur entirely (JS also skips writing it) — this
+   covers the pre-JS/off-screen fallback state above, which the JS skip
+   alone doesn't touch since it only runs once an element is tracked */
+.faq-section [data-fade-up] {
+  filter: none;
 }
 
 /* ─── FOOTER ─────────────────────────────────────────── */

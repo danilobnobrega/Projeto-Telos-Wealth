@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TELOSCINE | Telos Wealth</title>
+  <meta name="description" content="TELOSCINE — a sala de vídeos da Telos Wealth.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;600&family=Ibarra+Real+Nova:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="cinema.css">
+  <script type="importmap">
+  {"imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
+  }}
+  </script>
+</head>
+<body>
+
+<a href="./index.html" class="cinema-back">← Telos Wealth</a>
+
+<!-- shared canvas — hosts the 3D lobby first, then the 3D theater after a
+     ticket is bought (same renderer, one scene swapped for the other) -->
+<div id="cinema-canvas"></div>
+
+<!-- lightweight HUD over the lobby — a self-service kiosk now (desk,
+     computer, mouse, ticket printer), fixed camera, no dragging -->
+<div class="cinema-lobby-hud" id="cinema-lobby-hud">
+  <div class="cinema-lobby-name">TELOSCINE</div>
+  <div class="cinema-lobby-kicker">Bilheteria</div>
+  <div class="cinema-lobby-hint">clique numa sessão na tela pra emitir seu ingresso</div>
+</div>
+
+<div class="cinema-marquee cinema-hidden" id="cinema-marquee">
+  <div class="cinema-marquee-title">Em cartaz</div>
+  <ul class="cinema-marquee-list" id="cinema-marquee-list">
+    <li><button type="button" class="cinema-marquee-item" data-topic="0">Modelo Fee-Only</button></li>
+    <li><button type="button" class="cinema-marquee-item" data-topic="1">O cliente Telos</button></li>
+    <li><button type="button" class="cinema-marquee-item" data-topic="2">O que fazemos diferente</button></li>
+    <li><button type="button" class="cinema-marquee-item" data-topic="3">Nossa origem</button></li>
+  </ul>
+</div>
+
+<script type="module" src="cinema.js?v=22"></script>
+</body>
+</html>

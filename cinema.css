@@ -1,0 +1,137 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --cinema-black: #080606;
+  --cinema-red: #6e0f1a;
+  --cinema-red-deep: #3d0810;
+  --cinema-brass: #c9a15a;
+  --cinema-cream: #ece4d8;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--cinema-black);
+  color: var(--cinema-cream);
+  font-family: 'Roboto', sans-serif;
+  font-weight: 300;
+}
+
+#cinema-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  cursor: pointer;
+}
+#cinema-canvas canvas { display: block; width: 100%; height: 100%; }
+
+.cinema-hidden { display: none !important; }
+
+/* ─── BOX OFFICE (LOBBY) HUD ─────────────────────────────
+   the posters/room are 3D meshes now — this is just enough on-screen
+   context to explain the room is draggable, non-blocking otherwise */
+.cinema-lobby-hud {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  text-align: center;
+  padding-top: 36px;
+  pointer-events: none;
+}
+.cinema-lobby-name {
+  font-family: 'Roboto', sans-serif;
+  font-weight: 600;
+  font-size: min(32px, 6vw);
+  letter-spacing: 0.12em;
+  color: var(--cinema-cream);
+  text-shadow: 0 0 18px rgba(201, 161, 90, 0.5);
+  margin-bottom: 6px;
+}
+.cinema-lobby-kicker {
+  font-family: 'Ibarra Real Nova', serif;
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cinema-brass);
+  margin-bottom: 8px;
+}
+.cinema-lobby-hint {
+  font-family: 'Roboto', sans-serif;
+  font-weight: 300;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: rgba(236, 228, 216, 0.55);
+}
+
+.cinema-back {
+  position: fixed;
+  top: 28px;
+  left: 32px;
+  z-index: 10;
+  color: var(--cinema-cream);
+  text-decoration: none;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+.cinema-back:hover { opacity: 1; color: var(--cinema-brass); }
+
+.cinema-marquee {
+  position: fixed;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  z-index: 10;
+  text-align: center;
+  width: min(720px, 90vw);
+}
+.cinema-marquee-title {
+  font-family: 'Ibarra Real Nova', serif;
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cinema-brass);
+  margin-bottom: 14px;
+}
+.cinema-marquee-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px 14px;
+}
+.cinema-marquee-item {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(201, 161, 90, 0.35);
+  color: var(--cinema-cream);
+  font-family: 'Roboto', sans-serif;
+  font-weight: 300;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  padding: 10px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+.cinema-marquee-item:hover {
+  border-color: var(--cinema-brass);
+  color: var(--cinema-brass);
+}
+.cinema-marquee-item.active {
+  background: var(--cinema-brass);
+  border-color: var(--cinema-brass);
+  color: var(--cinema-black);
+}
+
+@media (max-width: 640px) {
+  .cinema-back { top: 18px; left: 18px; font-size: 11px; }
+  .cinema-marquee { bottom: 24px; }
+  .cinema-marquee-item { font-size: 12px; padding: 8px 14px; }
+}
