@@ -23,6 +23,7 @@ const TOPICS = [
    browser and adjust these numbers if the screen menu or the ticket don't
    line up with the model. */
 const KIOSK_MODEL_URL = 'models/kiosk.glb'
+const PRINTER_SOUND_URL = 'audio/print1.2.mp3'
 const KIOSK_TARGET_SIZE = 5.1   // meters, largest dimension — the knob for "how giant"
 const KIOSK_ROTATION_Y = PI / 2         // dead-on (flipped 180° in place), no left/right nudge
 const KIOSK_ROTATION_X = -0.35          // forward tilt, top leaning toward the camera — sign flipped because the model's own 180° yaw (KIOSK_ROTATION_Y) reverses which way local X-tilt reads on screen
@@ -88,9 +89,20 @@ const ROOM_FLOOR_Y = -KIOSK_SINK_Y
 const ROOM_CENTER_X = 0
 const ROOM_CENTER_Z = (CAMERA_Z + KIOSK_DEPTH_Z) / 2
 const ROOM_COLOR = 0x040404
-const LOOK_PITCH_LIMIT = 0.5    // radians — capped so it can't flip upside down looking straight up/down
+const LOOK_PITCH_LIMIT = 0.18   // radians (~10°) — vertical drag range, loosened a tiny bit from 0.16
+const LOOK_YAW_LIMIT = 0.38     // radians (~22°) — horizontal drag range, tightened a bit from 0.45
 const LOOK_SENSITIVITY = 0.003  // pixels -> radians
-const PRINTER_SLOT_GUESS = { x: -0.9, y: 0.95, z: -1.45 }
+/* stale coordinates from the old primitive kiosk (before the real 3D
+   model swap) — recalibrated to a fresh guess near the current kiosk's
+   position/floor height. reference photos of similar kiosks put the
+   ticket/nota-fiscal slot low on the machine (waist-to-knee height), not
+   near the top, so this starts near the floor and slightly toward the
+   camera from the kiosk's center — same guess-then-correct-in-browser
+   loop as everything else on this model. */
+const PRINTER_SLOT_GUESS = { x: KIOSK_X_OFFSET - 0.16, y: -KIOSK_SINK_Y + 2.8, z: KIOSK_DEPTH_Z - 1.3 } // camera looks toward +Z, so subtracting more here moves the ticket closer to the camera (in front of the kiosk, not behind it)
+const TICKET_WIDTH = 0.24
+const TICKET_CURL_RADIUS = 0.35 // meters — how tight the roll-curl arc is
+const TICKET_DROOP_SCALE = 0.8  // dampens only the downward (Y) part of the curl, independent of the radius — keeps the paper's overall length/reveal untouched, just falls less at the end
 
 /* ─── LOBBY (box office) ─────────────────────────────────────────────────
    a self-service kiosk: one real 3D model (bancada+computador+mouse+
@@ -346,7 +358,48 @@ class LobbyScene {
     this.printerSlot = new THREE.Vector3(PRINTER_SLOT_GUESS.x, PRINTER_SLOT_GUESS.y, PRINTER_SLOT_GUESS.z)
 
     const ticketMat = new THREE.MeshBasicMaterial({ color: 0xece4d8, side: THREE.DoubleSide })
-    const ticket = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.85), ticketMat)
+    const ticketHeight = 0.85
+    const ticketGeo = new THREE.PlaneGeometry(TICKET_WIDTH, ticketHeight, 1, 24)
+    /* anchor at the TOP edge instead of the plane's default center — a
+       real receipt printer feeds paper out downward from a slot above,
+       not upward from below. this way the top edge stays pinned at the
+       slot and the paper grows downward as scale.y increases. */
+    ticketGeo.translate(0, -ticketHeight / 2, 0)
+
+    /* real thermal receipt paper curls from being wound on a roll. right
+       at the slot the paper is still rigid/supported, so it shoots
+       forward (Z) first with barely any droop; only once it's clear of
+       the opening does gravity take over and it starts curling downward
+       (Y). same circular arc as before, just with sin/cos swapped
+       between the two axes — that swap alone is what makes Z lead near
+       angle≈0 (sin(angle)≈angle, grows immediately) while Y lags
+       (1-cos(angle)≈angle²/2, stays ~flat at first), instead of the
+       other way around. */
+    const posAttr = ticketGeo.attributes.position
+    for (let i = 0; i < posAttr.count; i++) {
+      const v = -posAttr.getY(i) / ticketHeight // 0 at the top anchor, 1 at the bottom tip
+      const arcLength = v * ticketHeight
+      const angle = arcLength / TICKET_CURL_RADIUS
+      posAttr.setY(i, -TICKET_CURL_RADIUS * (1 - Math.cos(angle)) * TICKET_DROOP_SCALE)
+      posAttr.setZ(i, posAttr.getZ(i) + TICKET_CURL_RADIUS * Math.sin(angle))
+    }
+    posAttr.needsUpdate = true
+    ticketGeo.computeVertexNormals()
+
+    /* growth via scale.y from a pivot at the anchor (local Y=0, which is
+       always exactly at position.y regardless of scale) — this is what
+       actually GUARANTEES paper stays visible right at the slot the
+       whole time, unconditionally. a clip-plane "slide through a fixed
+       threshold" approach was tried instead (paper translating downward,
+       revealed as it crosses a fixed world-Y line) for a more realistic
+       "old parts sink, new parts enter at the top" motion, but the curl
+       arc sweeps past 90° and doubles back on itself (Y isn't monotonic
+       along the strip's length), which broke the clip approach's
+       guarantee that something is always sitting exactly at the slot —
+       vertices near the tip's curl-back could lift back above the
+       threshold and disappear. scale-based growth doesn't have that
+       failure mode, at the cost of the anchor not visually drifting. */
+    const ticket = new THREE.Mesh(ticketGeo, ticketMat)
     ticket.position.copy(this.printerSlot)
     ticket.scale.y = 0.04
     ticket.visible = false
@@ -392,27 +445,11 @@ class LobbyScene {
     return new THREE.CanvasTexture(cv)
   }
 
-  /* short burst of rapid clicks at slightly randomized pitch — a
-     synthesized approximation of a receipt/ticket printer chattering,
-     since there's no real audio asset in the project to use instead */
+  /* real recorded receipt-printer sound effect, not synthesized. new
+     Audio() each time (rather than reusing one element) so rapid repeat
+     clicks don't cut a still-playing sound short. */
   _playPrinterSound() {
-    const Ctx = window.AudioContext || window.webkitAudioContext
-    if (!Ctx) return
-    const ctx = new Ctx()
-    const clicks = 16
-    for (let i = 0; i < clicks; i++) {
-      const t = ctx.currentTime + i * 0.045
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.type = 'square'
-      osc.frequency.value = 1700 + Math.random() * 500
-      gain.gain.setValueAtTime(0.05, t)
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.03)
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.start(t)
-      osc.stop(t + 0.035)
-    }
+    new Audio(PRINTER_SOUND_URL).play().catch(() => {})
   }
 
   _startPrinting(topicIndex) {
@@ -454,7 +491,7 @@ class LobbyScene {
       lastX = e.clientX
       lastY = e.clientY
       moved += Math.abs(dx) + Math.abs(dy)
-      this.yaw -= dx * LOOK_SENSITIVITY // unclamped — lets you spin all the way around, continuously
+      this.yaw = clamp(this.yaw - dx * LOOK_SENSITIVITY, -LOOK_YAW_LIMIT, LOOK_YAW_LIMIT)
       this.pitch = clamp(this.pitch - dy * LOOK_SENSITIVITY, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT)
     }
     this._onUp = () => {

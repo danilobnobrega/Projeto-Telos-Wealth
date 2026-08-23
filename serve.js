@@ -7,6 +7,7 @@ const MIME = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg',
   '.woff2': 'font/woff2', '.woff': 'font/woff', '.gif': 'image/gif',
+  '.mp3': 'audio/mpeg', '.glb': 'model/gltf-binary', '.hdr': 'application/octet-stream',
 }
 
 http.createServer((req, res) => {
