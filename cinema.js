@@ -90,7 +90,7 @@ const LOOK_SENSITIVITY = 0.003  // pixels -> radians, how fast dragging spins th
    near the top, so this starts near the floor and slightly toward the
    camera from the kiosk's center — same guess-then-correct-in-browser
    loop as everything else on this model. */
-const PRINTER_SLOT_GUESS = { x: KIOSK_X_OFFSET - 0.16, y: -KIOSK_SINK_Y + 2.8, z: KIOSK_DEPTH_Z - 0.5 } // was -1.3 — floated too far in front of the kiosk's body, reading as disconnected from the machine
+const PRINTER_SLOT_GUESS = { x: KIOSK_X_OFFSET - 0.167, y: -KIOSK_SINK_Y + 2.8, z: KIOSK_DEPTH_Z - 0.5 }
 /* first guess at the kiosk's actual monitor position — same
    guess-then-correct-in-browser loop as PRINTER_SLOT_GUESS above, since
    the fused single-mesh GLB has no named screen sub-part to measure
