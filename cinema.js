@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js'
 
 const PI = Math.PI
 function lerp(a, b, t) { return a + (b - a) * t }
@@ -77,18 +78,10 @@ const SIGN_SPLIT_FLIP = true    // the local axis runs opposite to the visual le
 const SIGN_RED = 0xff2d55
 
 /* the room itself — a real enclosed cylinder (floor + wall + ceiling, no
-   gaps/doors) built from geometry instead of a photo backdrop, per the
-   user's ask to hand-build the space and direct lights/objects from here.
-   floor sits exactly at the model's true resting height (-KIOSK_SINK_Y),
-   so the kiosk's feet meet the floor instead of floating or clipping
-   through it. radius/height sized with margin around the camera<->kiosk
-   span so both stay comfortably inside with room to look around. */
-const ROOM_RADIUS = 10
-const ROOM_HEIGHT = 10
-const ROOM_FLOOR_Y = -KIOSK_SINK_Y
-const ROOM_CENTER_X = 0
-const ROOM_CENTER_Z = (CAMERA_Z + KIOSK_DEPTH_Z) / 2
-const ROOM_COLOR = 0x040404
+   gaps/doors) — a real photo studio backdrop instead of a hand-built
+   geometric room, so reflections/lighting on the kiosk read as real. */
+const HDRI_URL = 'models/hdri/ferndale_studio_06_4k.hdr'
+const CURTAIN_IMAGE_URL = 'images/curtain-reference.jpg'
 const LOOK_SENSITIVITY = 0.003  // pixels -> radians, how fast dragging spins the kiosk
 /* stale coordinates from the old primitive kiosk (before the real 3D
    model swap) — recalibrated to a fresh guess near the current kiosk's
@@ -124,14 +117,111 @@ class LobbyScene {
     this.height = window.innerHeight
     this.printing = false
     this.roomMeshes = []
+    this.ready = false // gates drag/click until the curtain has opened — see _initCurtainPreloader
 
     this._initCamera()
     this._initScene()
-    this._initRoom()
+    this._initLoadingManager()
+    this._initCurtainPreloader()
+    this._initEnvironment()
     this._initLights()
     this._initKioskModel()
     this._initTicket()
     this._bindEvents()
+  }
+
+  /* shared by every loader in this scene (kiosk .glb, HDRI .hdr) so the
+     curtain preloader knows exactly when both heavy assets are actually
+     done — not a guessed timer. */
+  _initLoadingManager() {
+    this.loadingManager = new THREE.LoadingManager()
+    this.loadingManager.onLoad = () => this._openCurtain()
+  }
+
+  /* a real photo of a velvet curtain (Danilo's own reference image, see
+     images/curtain-reference.jpg), split down the middle — the left half
+     of the photo on curtainL, the right half on curtainR (via
+     texture.repeat/offset) — so the two panels together reconstruct the
+     full photo when closed, then slide apart on open exactly like the
+     photo was torn in two. parented to the camera so it always fills the
+     frame regardless of the camera's exact aim, without needing
+     per-frame position updates. panel size is generously oversized (real
+     coverage needed is well under half that at this FOV/distance even on
+     ultra-wide screens) so it isn't worth recomputing on resize. stays
+     closed until _initLoadingManager's onLoad fires — i.e. until the
+     kiosk model AND the HDRI have both actually finished downloading.
+
+     the panels stay invisible until the photo texture itself has loaded
+     — no flat-color fallback. Danilo explicitly didn't want a flash of
+     plain red before the real photo appears, even briefly; the trade-off
+     is a (normally imperceptible, since this file is small and local)
+     moment where nothing covers the screen yet if the image is slow to
+     arrive, versus a guaranteed-instant but wrong-looking red flash. */
+  _initCurtainPreloader() {
+    this.scene.add(this.camera) // children of the camera only render if the camera itself is in the scene graph
+    /* sized to the camera's actual visible frustum at `distance`, not a
+       flat oversized guess — a panel much bigger than what's on screen
+       means only a tiny sliver near its center ever falls inside the
+       frustum, so the photo texture (UV-mapped across the WHOLE panel)
+       would show as an extreme, blurry crop-zoom instead of the full
+       photo. a 20% margin covers the fold-margin/overlap below without
+       reintroducing that problem. */
+    const distance = 1.2, overlap = 0.15
+    const vFovRad = THREE.MathUtils.degToRad(CAMERA_FOV)
+    const visibleHeight = 2 * Math.tan(vFovRad / 2) * distance
+    const visibleWidth = visibleHeight * (this.width / this.height)
+    const margin = 1.2
+    const height = visibleHeight * margin
+    const width = visibleWidth * margin / 2 + overlap // per panel — half the screen each, plus overlap
+    const matL = new THREE.MeshBasicMaterial()
+    const matR = new THREE.MeshBasicMaterial()
+    this.curtainL = new THREE.Mesh(new THREE.PlaneGeometry(width, height), matL)
+    this.curtainR = new THREE.Mesh(new THREE.PlaneGeometry(width, height), matR)
+    this.curtainL.visible = false
+    this.curtainR.visible = false
+    this.curtainClosedX = width / 2 - overlap
+    this.curtainOpenX = this.curtainClosedX + width * 1.3
+    this.curtainL.position.set(-this.curtainClosedX, 0, -distance)
+    this.curtainR.position.set(this.curtainClosedX, 0, -distance)
+    this.camera.add(this.curtainL, this.curtainR)
+    this.roomMeshes.push(this.curtainL, this.curtainR)
+
+    new THREE.TextureLoader().load(CURTAIN_IMAGE_URL, texture => {
+      texture.colorSpace = THREE.SRGBColorSpace
+      const texL = texture
+      const texR = texture.clone()
+      texR.needsUpdate = true
+      texL.wrapS = texL.wrapT = THREE.ClampToEdgeWrapping
+      texR.wrapS = texR.wrapT = THREE.ClampToEdgeWrapping
+      texL.repeat.set(0.5, 1)
+      texL.offset.set(0, 0) // left half of the photo
+      texR.repeat.set(0.5, 1)
+      texR.offset.set(0.5, 0) // right half of the photo
+      matL.map = texL
+      matR.map = texR
+      matL.needsUpdate = true
+      matR.needsUpdate = true
+      this.curtainL.visible = true
+      this.curtainR.visible = true
+      this.curtainRevealStart = performance.now()
+    })
+  }
+
+  /* on a fast connection (or localhost) the assets can finish in well
+     under a second — without a floor here, the curtain would flash
+     shut-then-open so quickly it reads as a glitch rather than a
+     deliberate reveal. holding it closed for at least MIN_VISIBLE_MS
+     regardless of how fast loading actually was keeps the reveal
+     legible for every visitor, not just ones on slow connections. */
+  _openCurtain() {
+    const MIN_VISIBLE_MS = 900
+    const elapsed = performance.now() - this.curtainRevealStart
+    const wait = Math.max(0, MIN_VISIBLE_MS - elapsed)
+    setTimeout(() => {
+      this.curtainOpening = true
+      this.curtainOpenStart = performance.now()
+      this.curtainOpenDuration = 2200
+    }, wait)
   }
 
   /* fixed camera — no drag-look. dragging spins the kiosk itself instead
@@ -149,27 +239,29 @@ class LobbyScene {
     this.scene = new THREE.Scene()
   }
 
-  /* a real enclosed room — one cylinder, viewed from the inside (BackSide),
-     with built-in flat caps acting as floor and ceiling, so there's no
-     gap/doorway anywhere in it ("sem saída"). dark, near-black material —
-     the point lights in _initLights are what make the kiosk (and a
-     visible ring of nearby floor/wall) readable at all. */
-  _initRoom() {
-    const geo = new THREE.CylinderGeometry(ROOM_RADIUS, ROOM_RADIUS, ROOM_HEIGHT, 48, 1, false)
-    const mat = new THREE.MeshStandardMaterial({ color: ROOM_COLOR, roughness: 0.95, metalness: 0, side: THREE.BackSide })
-    const room = new THREE.Mesh(geo, mat)
-    room.position.set(ROOM_CENTER_X, ROOM_FLOOR_Y + ROOM_HEIGHT / 2, ROOM_CENTER_Z)
-    this.scene.add(room)
-    this.roomMeshes.push(room)
+  /* photo studio HDRI — used only for scene.environment (lighting/
+     reflections on the kiosk's materials); scene.background stays a
+     solid black instead of the HDRI photo itself, per Danilo's call
+     after comparing both. loaded async like everything else GLB/texture
+     in this scene; the kiosk itself doesn't wait on it. */
+  _initEnvironment() {
+    this.scene.background = new THREE.Color(0x000000)
+    new RGBELoader(this.loadingManager).load(HDRI_URL, texture => {
+      texture.mapping = THREE.EquirectangularReflectionMapping
+      this.scene.environment = texture
+      this.hdriTexture = texture
+    })
   }
 
   /* shared by every real 3D asset dropped into the kiosk (counter, printer,
      ...) — loads a .glb and hands back its root scene node. positioning,
      mesh lookups by name, and roomMeshes bookkeeping are the caller's job,
-     since those depend on each specific file's own structure. */
+     since those depend on each specific file's own structure. routed
+     through loadingManager so the curtain preloader knows when this
+     finishes too (see _initLoadingManager). */
   _loadGLTF(url) {
     return new Promise((resolve, reject) => {
-      const loader = new GLTFLoader()
+      const loader = new GLTFLoader(this.loadingManager)
       loader.setMeshoptDecoder(MeshoptDecoder)
       loader.load(url, gltf => resolve(gltf.scene), undefined, reject)
     })
@@ -478,6 +570,7 @@ class LobbyScene {
     let moved = 0
 
     this._onDown = e => {
+      if (!this.ready) return // curtain still closed — nothing to spin or click yet
       dragging = true
       moved = 0
       lastX = e.clientX
@@ -512,6 +605,17 @@ class LobbyScene {
   }
 
   update() {
+    if (this.curtainOpening) {
+      const t = clamp((performance.now() - this.curtainOpenStart) / this.curtainOpenDuration, 0, 1)
+      const eased = easeOutCubic(t)
+      const x = lerp(this.curtainClosedX, this.curtainOpenX, eased)
+      this.curtainL.position.x = -x
+      this.curtainR.position.x = x
+      if (t >= 1) {
+        this.curtainOpening = false
+        this.ready = true
+      }
+    }
     if (this.printing) {
       const t = clamp((performance.now() - this.printStart) / this.printDuration, 0, 1)
       this.ticketMesh.scale.y = lerp(TICKET_START_SCALE, 1, easeOutCubic(t))
@@ -537,6 +641,7 @@ class LobbyScene {
         m.material.dispose()
       }
     })
+    this.hdriTexture?.dispose()
   }
 }
 
