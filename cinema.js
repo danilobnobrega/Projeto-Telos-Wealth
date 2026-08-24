@@ -91,6 +91,19 @@ const LOOK_SENSITIVITY = 0.003  // pixels -> radians, how fast dragging spins th
    camera from the kiosk's center — same guess-then-correct-in-browser
    loop as everything else on this model. */
 const PRINTER_SLOT_GUESS = { x: KIOSK_X_OFFSET - 0.16, y: -KIOSK_SINK_Y + 2.8, z: KIOSK_DEPTH_Z - 0.5 } // was -1.3 — floated too far in front of the kiosk's body, reading as disconnected from the machine
+/* first guess at the kiosk's actual monitor position — same
+   guess-then-correct-in-browser loop as PRINTER_SLOT_GUESS above, since
+   the fused single-mesh GLB has no named screen sub-part to measure
+   against directly. higher than the printer slot (screens sit at
+   standing eye level, not waist height) and right at the kiosk's front
+   face. width/height keep the source image's own 900x1600 (9:16)
+   aspect ratio — SCREEN_HEIGHT independent so it can be tuned without
+   distorting the image. */
+const KIOSK_SCREEN_IMAGE_URL = 'images/kiosk-menu-test.jpg'
+const KIOSK_SCREEN_GUESS = { x: KIOSK_X_OFFSET, y: -KIOSK_SINK_Y + 3.6, z: KIOSK_DEPTH_Z - 0.71 }
+const KIOSK_SCREEN_HEIGHT = 0.7
+const KIOSK_SCREEN_WIDTH = KIOSK_SCREEN_HEIGHT * (900 / 1600)
+const KIOSK_SCREEN_TILT = 0.09 // radians — positive tilts the TOP of the plane away from the camera (backward); confirmed via vector math, not guessed
 const TICKET_WIDTH = 0.24
 const TICKET_CURL_RADIUS = 0.35 // meters — how tight the roll-curl arc is
 const TICKET_DROOP_SCALE = 0.8  // dampens only the downward (Y) part of the curl, independent of the radius — keeps the paper's overall length/reveal untouched, just falls less at the end
@@ -101,14 +114,14 @@ const TICKET_START_SCALE = 0.008 // was 0.04 — only Y is what scale.y actually
 
 /* ─── LOBBY (box office) ─────────────────────────────────────────────────
    a self-service kiosk: one real 3D model (bancada+computador+mouse+
-   impressora, fused, AI-generated) as the visual backdrop. the session
-   menu itself is a plain DOM overlay (#cinema-kiosk-menu in cinema.html)
-   rather than a floating 3D plane — a 3D overlay positioned against a
-   screen we can't actually locate inside the fused mesh either sat
-   floating in empty space or got swallowed by the model once it loaded,
-   so this sidesteps that entirely. fixed camera, no drag-look. does not
-   own a renderer or a render loop — CinemaApp drives both scenes through
-   one shared renderer. */
+   impressora, fused, AI-generated) as the visual backdrop, plus a real
+   3D plane (not a DOM overlay) for the on-screen menu image, reparented
+   under the kiosk so it spins along with it on drag — a DOM overlay was
+   tried first but can't rotate along with the 3D model, so it drifted
+   off the screen the moment the kiosk was spun. fixed camera, no
+   drag-look (dragging spins the kiosk instead, see _bindEvents). does
+   not own a renderer or a render loop — CinemaApp drives both scenes
+   through one shared renderer. */
 class LobbyScene {
   constructor(container, onBuyTicket) {
     this.container = container
@@ -127,6 +140,7 @@ class LobbyScene {
     this._initLights()
     this._initKioskModel()
     this._initTicket()
+    this._initKioskScreen()
     this._bindEvents()
   }
 
@@ -214,6 +228,7 @@ class LobbyScene {
      regardless of how fast loading actually was keeps the reveal
      legible for every visitor, not just ones on slow connections. */
   _openCurtain() {
+    if (!this.curtainL) return // TEMPORARY — curtain disabled during calibration (see constructor), nothing to open
     const MIN_VISIBLE_MS = 900
     const elapsed = performance.now() - this.curtainRevealStart
     const wait = Math.max(0, MIN_VISIBLE_MS - elapsed)
@@ -326,6 +341,7 @@ class LobbyScene {
          current world position/rotation across the reparent), so it
          spins along with the kiosk instead of staying fixed in place. */
       if (this.ticketMesh) this.kioskRoot.attach(this.ticketMesh)
+      if (this.kioskScreenMesh) this.kioskRoot.attach(this.kioskScreenMesh)
 
       /* camera stays level — no up or down tilt at all. the model's own
          position (feet at floor level, see _initKioskModel above) is what
@@ -497,6 +513,37 @@ class LobbyScene {
     this.scene.add(ticket)
     this.roomMeshes.push(ticket)
     this.ticketMesh = ticket
+  }
+
+  /* the kiosk's on-screen menu image, as a real 3D plane instead of a DOM
+     overlay — a DOM overlay was tried first, but it's stuck in fixed
+     screen-space and can't rotate along with the 3D model, so it drifted
+     right off the physical screen the moment the kiosk was spun via
+     drag. reparented under the kiosk once it loads (see
+     _initKioskModel), same attach() pattern as the ticket, so it's
+     "glued" to the screen and spins along with the machine. routed
+     through the shared loadingManager so it's already loaded by the
+     time the curtain opens — no separate pop-in after the kiosk itself
+     appears. rotated 180° because the camera sits at a smaller world Z
+     than the kiosk (looks toward +Z), so a default-facing plane (normal
+     pointing +Z) would show its backface to the camera. */
+  _initKioskScreen() {
+    const geo = new THREE.PlaneGeometry(KIOSK_SCREEN_WIDTH, KIOSK_SCREEN_HEIGHT)
+    const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }) // visible from either face — removes any risk of a rotation/orientation mistake making it invisible
+    const mesh = new THREE.Mesh(geo, mat)
+    mesh.position.set(KIOSK_SCREEN_GUESS.x, KIOSK_SCREEN_GUESS.y, KIOSK_SCREEN_GUESS.z)
+    mesh.rotation.set(KIOSK_SCREEN_TILT, Math.PI, 0)
+    mesh.visible = false // stays hidden until its texture loads — an untextured plane defaults to plain white, which would show through as a flash before the curtain (itself gated on its own texture) has anything to hide it behind
+    this.scene.add(mesh)
+    this.roomMeshes.push(mesh)
+    this.kioskScreenMesh = mesh
+
+    new THREE.TextureLoader(this.loadingManager).load(KIOSK_SCREEN_IMAGE_URL, texture => {
+      texture.colorSpace = THREE.SRGBColorSpace
+      mat.map = texture
+      mat.needsUpdate = true
+      mesh.visible = true
+    })
   }
 
   _ticketTexture(title) {
