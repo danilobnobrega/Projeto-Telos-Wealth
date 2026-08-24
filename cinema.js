@@ -100,10 +100,11 @@ const PRINTER_SLOT_GUESS = { x: KIOSK_X_OFFSET - 0.16, y: -KIOSK_SINK_Y + 2.8, z
    aspect ratio — SCREEN_HEIGHT independent so it can be tuned without
    distorting the image. */
 const KIOSK_SCREEN_IMAGE_URL = 'images/kiosk-menu-test.jpg'
-const KIOSK_SCREEN_GUESS = { x: KIOSK_X_OFFSET, y: -KIOSK_SINK_Y + 3.6, z: KIOSK_DEPTH_Z - 0.71 }
-const KIOSK_SCREEN_HEIGHT = 0.7
+const KIOSK_SCREEN_GUESS = { x: KIOSK_X_OFFSET, y: -KIOSK_SINK_Y + 3.96, z: KIOSK_DEPTH_Z - 0.6825 }
+const KIOSK_SCREEN_HEIGHT = 1.80
 const KIOSK_SCREEN_WIDTH = KIOSK_SCREEN_HEIGHT * (900 / 1600)
-const KIOSK_SCREEN_TILT = 0.09 // radians — positive tilts the TOP of the plane away from the camera (backward); confirmed via vector math, not guessed
+const KIOSK_SCREEN_TILT = 0.077 // radians — positive tilts the TOP of the plane away from the camera (backward); confirmed via vector math, not guessed
+const KIOSK_SCREEN_ROLL = 0 // radians — negative tilts the plane clockwise (as the camera sees it), i.e. right side down; confirmed via vector math against the camera's actual up/right basis, not guessed
 const TICKET_WIDTH = 0.24
 const TICKET_CURL_RADIUS = 0.35 // meters — how tight the roll-curl arc is
 const TICKET_DROOP_SCALE = 0.8  // dampens only the downward (Y) part of the curl, independent of the radius — keeps the paper's overall length/reveal untouched, just falls less at the end
@@ -532,7 +533,7 @@ class LobbyScene {
     const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }) // visible from either face — removes any risk of a rotation/orientation mistake making it invisible
     const mesh = new THREE.Mesh(geo, mat)
     mesh.position.set(KIOSK_SCREEN_GUESS.x, KIOSK_SCREEN_GUESS.y, KIOSK_SCREEN_GUESS.z)
-    mesh.rotation.set(KIOSK_SCREEN_TILT, Math.PI, 0)
+    mesh.rotation.set(KIOSK_SCREEN_TILT, Math.PI, KIOSK_SCREEN_ROLL)
     mesh.visible = false // stays hidden until its texture loads — an untextured plane defaults to plain white, which would show through as a flash before the curtain (itself gated on its own texture) has anything to hide it behind
     this.scene.add(mesh)
     this.roomMeshes.push(mesh)
