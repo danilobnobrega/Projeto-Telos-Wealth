@@ -89,9 +89,7 @@ const ROOM_FLOOR_Y = -KIOSK_SINK_Y
 const ROOM_CENTER_X = 0
 const ROOM_CENTER_Z = (CAMERA_Z + KIOSK_DEPTH_Z) / 2
 const ROOM_COLOR = 0x040404
-const LOOK_PITCH_LIMIT = 0.18   // radians (~10°) — vertical drag range, loosened a tiny bit from 0.16
-const LOOK_YAW_LIMIT = 0.38     // radians (~22°) — horizontal drag range, tightened a bit from 0.45
-const LOOK_SENSITIVITY = 0.003  // pixels -> radians
+const LOOK_SENSITIVITY = 0.003  // pixels -> radians, how fast dragging spins the kiosk
 /* stale coordinates from the old primitive kiosk (before the real 3D
    model swap) — recalibrated to a fresh guess near the current kiosk's
    position/floor height. reference photos of similar kiosks put the
@@ -99,10 +97,14 @@ const LOOK_SENSITIVITY = 0.003  // pixels -> radians
    near the top, so this starts near the floor and slightly toward the
    camera from the kiosk's center — same guess-then-correct-in-browser
    loop as everything else on this model. */
-const PRINTER_SLOT_GUESS = { x: KIOSK_X_OFFSET - 0.16, y: -KIOSK_SINK_Y + 2.8, z: KIOSK_DEPTH_Z - 1.3 } // camera looks toward +Z, so subtracting more here moves the ticket closer to the camera (in front of the kiosk, not behind it)
+const PRINTER_SLOT_GUESS = { x: KIOSK_X_OFFSET - 0.16, y: -KIOSK_SINK_Y + 2.8, z: KIOSK_DEPTH_Z - 0.5 } // was -1.3 — floated too far in front of the kiosk's body, reading as disconnected from the machine
 const TICKET_WIDTH = 0.24
 const TICKET_CURL_RADIUS = 0.35 // meters — how tight the roll-curl arc is
 const TICKET_DROOP_SCALE = 0.8  // dampens only the downward (Y) part of the curl, independent of the radius — keeps the paper's overall length/reveal untouched, just falls less at the end
+const TICKET_FORWARD_SCALE = 2.2 // amplifies only the forward (Z) part of the curl, independent of the radius/length — full strength at the anchor
+const TICKET_FORWARD_TAPER = 0.6 // fraction of that forward push lost by the free tip — keeps the curve at the top exactly as strong, easing off toward the end instead of pushing forward at a constant rate the whole way
+const TICKET_TOP_CURL_BIAS = 0.15 // radians — a small head start on the forward curve right at the anchor, so it doesn't begin from a dead-flat zero; only affects Z (forward), not Y (droop stays flush at the top)
+const TICKET_START_SCALE = 0.008 // was 0.04 — only Y is what scale.y actually shrinks, so width/forward-curl stayed full-size even at the smallest reveal, reading as a stubby chunk popping in rather than growing from nothing
 
 /* ─── LOBBY (box office) ─────────────────────────────────────────────────
    a self-service kiosk: one real 3D model (bancada+computador+mouse+
@@ -132,26 +134,15 @@ class LobbyScene {
     this._bindEvents()
   }
 
+  /* fixed camera — no drag-look. dragging spins the kiosk itself instead
+     (see _bindEvents), so the camera just aims once at baseLookAt and
+     that's it; baseLookAt still gets updated once the kiosk model
+     finishes loading and its real center is known. */
   _initCamera() {
     this.camera = new THREE.PerspectiveCamera(CAMERA_FOV, this.width / this.height, 0.1, 100)
     this.camera.position.set(0, CAMERA_Y, CAMERA_Z)
     this.baseLookAt = new THREE.Vector3(0, CAMERA_Y + CAMERA_TILT, KIOSK_DEPTH_Z)
-    this.yaw = 0
-    this.pitch = 0
     this.camera.lookAt(this.baseLookAt)
-  }
-
-  /* applies the drag-look yaw/pitch offset on top of baseLookAt — camera
-     position never moves, only which point (at a fixed distance) it's
-     aimed at, so you can look around the 360 lobby without walking */
-  _updateCameraLook() {
-    const dir = new THREE.Vector3().subVectors(this.baseLookAt, this.camera.position)
-    const dist = dir.length()
-    dir.normalize()
-    dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw)
-    const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize()
-    dir.applyAxisAngle(right, this.pitch)
-    this.camera.lookAt(this.camera.position.clone().add(dir.multiplyScalar(dist)))
   }
 
   _initScene() {
@@ -235,15 +226,22 @@ class LobbyScene {
 
       root.traverse(node => { if (node.isMesh) this.roomMeshes.push(node) })
       this.scene.add(root)
+      this.kioskRoot = root // kept so the drag handler can spin the kiosk itself (see _bindEvents)
+
+      /* the ticket is built before the kiosk finishes loading (async), so
+         it starts out as a direct child of the scene — reparent it under
+         the kiosk now that both exist, via attach() (preserves its
+         current world position/rotation across the reparent), so it
+         spins along with the kiosk instead of staying fixed in place. */
+      if (this.ticketMesh) this.kioskRoot.attach(this.ticketMesh)
 
       /* camera stays level — no up or down tilt at all. the model's own
          position (feet at floor level, see _initKioskModel above) is what
-         determines the framing now, not the camera's aim. this becomes
-         the drag-look's rest position (see _updateCameraLook). */
+         determines the framing now, not the camera's aim. */
       const finalBox = new THREE.Box3().setFromObject(root)
       const finalCenter = finalBox.getCenter(new THREE.Vector3())
       this.baseLookAt.set(finalCenter.x, CAMERA_Y + CAMERA_TILT, finalCenter.z)
-      this._updateCameraLook()
+      this.camera.lookAt(this.baseLookAt)
 
       this._initSign(finalBox.max.y, finalCenter.x, finalCenter.z)
     })
@@ -358,7 +356,7 @@ class LobbyScene {
     this.printerSlot = new THREE.Vector3(PRINTER_SLOT_GUESS.x, PRINTER_SLOT_GUESS.y, PRINTER_SLOT_GUESS.z)
 
     const ticketMat = new THREE.MeshBasicMaterial({ color: 0xece4d8, side: THREE.DoubleSide })
-    const ticketHeight = 0.85
+    const ticketHeight = 0.425 // was 0.85 — only the length is halved, width and curl radius stay at their original size
     const ticketGeo = new THREE.PlaneGeometry(TICKET_WIDTH, ticketHeight, 1, 24)
     /* anchor at the TOP edge instead of the plane's default center — a
        real receipt printer feeds paper out downward from a slot above,
@@ -381,7 +379,8 @@ class LobbyScene {
       const arcLength = v * ticketHeight
       const angle = arcLength / TICKET_CURL_RADIUS
       posAttr.setY(i, -TICKET_CURL_RADIUS * (1 - Math.cos(angle)) * TICKET_DROOP_SCALE)
-      posAttr.setZ(i, posAttr.getZ(i) + TICKET_CURL_RADIUS * Math.sin(angle))
+      const forwardScale = TICKET_FORWARD_SCALE * (1 - TICKET_FORWARD_TAPER * v)
+      posAttr.setZ(i, posAttr.getZ(i) - TICKET_CURL_RADIUS * Math.sin(angle + TICKET_TOP_CURL_BIAS) * forwardScale)
     }
     posAttr.needsUpdate = true
     ticketGeo.computeVertexNormals()
@@ -401,7 +400,7 @@ class LobbyScene {
        failure mode, at the cost of the anchor not visually drifting. */
     const ticket = new THREE.Mesh(ticketGeo, ticketMat)
     ticket.position.copy(this.printerSlot)
-    ticket.scale.y = 0.04
+    ticket.scale.y = TICKET_START_SCALE
     ticket.visible = false
     this.scene.add(ticket)
     this.roomMeshes.push(ticket)
@@ -462,17 +461,17 @@ class LobbyScene {
     this.ticketMesh.material.map?.dispose()
     this.ticketMesh.material.map = this._ticketTexture(TOPICS[topicIndex].title)
     this.ticketMesh.material.needsUpdate = true
-    this.ticketMesh.scale.y = 0.04
+    this.ticketMesh.scale.y = TICKET_START_SCALE
     this.ticketMesh.visible = true
 
     this._playPrinterSound()
   }
 
-  /* a drag lets you look around the 360 lobby (clamped, see LOOK_*_LIMIT
-     — camera position stays put, only its aim changes); a plain click
-     (movement stays under the threshold) buys the default (topic 0)
-     ticket instead and cuts to the theater, where the marquee (unchanged)
-     already lets you switch among all 4 topics */
+  /* a drag spins the kiosk itself in place (free, unclamped — camera
+     stays fixed); a plain click (movement stays under the threshold)
+     buys the default (topic 0) ticket instead and cuts to the theater,
+     where the marquee (unchanged) already lets you switch among all 4
+     topics */
   _bindEvents() {
     let dragging = false
     let lastX = 0, lastY = 0
@@ -491,8 +490,7 @@ class LobbyScene {
       lastX = e.clientX
       lastY = e.clientY
       moved += Math.abs(dx) + Math.abs(dy)
-      this.yaw = clamp(this.yaw - dx * LOOK_SENSITIVITY, -LOOK_YAW_LIMIT, LOOK_YAW_LIMIT)
-      this.pitch = clamp(this.pitch - dy * LOOK_SENSITIVITY, -LOOK_PITCH_LIMIT, LOOK_PITCH_LIMIT)
+      if (this.kioskRoot) this.kioskRoot.rotation.y += dx * LOOK_SENSITIVITY
     }
     this._onUp = () => {
       dragging = false
@@ -514,10 +512,9 @@ class LobbyScene {
   }
 
   update() {
-    this._updateCameraLook()
     if (this.printing) {
       const t = clamp((performance.now() - this.printStart) / this.printDuration, 0, 1)
-      this.ticketMesh.scale.y = lerp(0.04, 1, easeOutCubic(t))
+      this.ticketMesh.scale.y = lerp(TICKET_START_SCALE, 1, easeOutCubic(t))
       if (t >= 1) {
         this.printing = false
         // DISABLED while calibrating the lobby — re-enable this call when
