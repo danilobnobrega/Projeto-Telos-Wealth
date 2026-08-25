@@ -1,4 +1,6 @@
 import * as THREE from 'three'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
 
 const PI = Math.PI
 
@@ -424,8 +426,139 @@ void main() {
 }
 `
 
-const PARTICLE_COLOR_LIGHT = [0.68, 0.77, 0.76]      /* soft teal-gray, subtle on white — same accent family as dark mode instead of pure neutral gray */
-const PARTICLE_COLOR_DARK  = [0.30, 0.48, 0.45]      /* muted petrol/teal green, on black */
+const PARTICLE_COLOR = [0.30, 0.48, 0.45]      /* muted petrol/teal green, on black */
+
+// ─── PROJECTOR WIDGET (persistent link to the cinema page) ────────────────────
+// its own tiny WebGL context — same "one canvas, one job" approach as
+// MainScene/RingScene, just scoped to a small icon-sized element docked in
+// the header instead of a full section. model is a real 3D asset
+// (models/projector.glb), fitted at runtime the same way the cinema kiosk
+// model is: measure the real bounding box, scale to a target size, center
+// it — no hand-guessed offsets, since every export has its own arbitrary
+// unit scale/pivot.
+const PROJECTOR_MODEL_URL = './models/projector.glb'
+const PROJECTOR_TARGET_SIZE = 0.5
+const PROJECTOR_CANVAS_PX = 130
+
+class ProjectorWidget {
+  constructor(container) {
+    this.container = container
+    this.width = PROJECTOR_CANVAS_PX
+    this.height = PROJECTOR_CANVAS_PX
+    this.mouseX = window.innerWidth / 2
+    this.mouseY = window.innerHeight / 2
+    this.raycaster = new THREE.Raycaster()
+    this.ndc = new THREE.Vector2()
+
+    this._initRenderer()
+    this._initScene()
+    this._loadModel()
+    this._bindEvents()
+
+    this.raf = requestAnimationFrame(t => this._loop(t))
+  }
+
+  _initRenderer() {
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    // updateStyle=false — otherwise three.js sets an inline canvas.style
+    // width/height, which would override the CSS's 100%/mobile sizing
+    this.renderer.setSize(this.width, this.height, false)
+    this.container.appendChild(this.renderer.domElement)
+  }
+
+  _initScene() {
+    this.scene = new THREE.Scene()
+    this.camera = new THREE.PerspectiveCamera(35, this.width / this.height, 0.01, 100)
+    this.camera.position.set(0.42, 0.32, 0.5) // provisional — refit once the model's real size is known, see _loadModel
+    this.camera.lookAt(0, 0, 0)
+
+    this.scene.add(new THREE.AmbientLight(0xffffff, 1.1))
+    const key = new THREE.DirectionalLight(0xffffff, 1.8)
+    key.position.set(2, 3, 2)
+    this.scene.add(key)
+    const fill = new THREE.DirectionalLight(0xc9a15a, 0.7)
+    fill.position.set(-2, 1, -1.5)
+    this.scene.add(fill)
+    const rim = new THREE.DirectionalLight(0xffffff, 0.5)
+    rim.position.set(0, -1, -2)
+    this.scene.add(rim)
+  }
+
+  _loadModel() {
+    const loader = new GLTFLoader()
+    loader.setMeshoptDecoder(MeshoptDecoder)
+    loader.load(PROJECTOR_MODEL_URL, gltf => {
+      const root = gltf.scene
+      const box = new THREE.Box3().setFromObject(root)
+      const size = box.getSize(new THREE.Vector3())
+      const center = box.getCenter(new THREE.Vector3())
+      const scale = PROJECTOR_TARGET_SIZE / Math.max(size.x, size.y, size.z)
+      root.scale.setScalar(scale)
+      root.position.set(-center.x * scale, -center.y * scale, -center.z * scale)
+
+      /* rotating `root` directly would spin it around its own native
+         pivot, not its visual center — since that pivot is wherever the
+         model's own local (0,0,0) happens to be, rarely the geometric
+         center, the whole object would orbit away from view instead of
+         spinning in place. wrapping it in a group and rotating the
+         (unpositioned) wrapper instead keeps the visual center pinned at
+         the world origin regardless of rotation. */
+      this.root = new THREE.Group()
+      this.root.add(root)
+      this.root.rotation.y = Math.PI // model's native front faced away from camera — flipped to face forward
+      this.baseYaw = this.root.rotation.y
+      this.scene.add(this.root)
+
+      /* fit the camera to the model's real bounding sphere (not a
+         hand-guessed distance) — a guessed distance clipped the model at
+         several rotation angles, since the visible frustum at that
+         distance was actually smaller than the object's own diagonal. */
+      const sphere = new THREE.Box3().setFromObject(this.root).getBoundingSphere(new THREE.Sphere())
+      const fovRad = THREE.MathUtils.degToRad(this.camera.fov)
+      const margin = 1.7 // breathing room so the model never clips at any rotation angle
+      const dist = (sphere.radius / Math.sin(fovRad / 2)) * margin
+      // mostly head-on (previously a steep 3/4 diagonal) — with the camera
+      // that angled, rotating the model on world X/Y didn't correspond
+      // cleanly to left/right and up/down on screen, so "looking at the
+      // mouse" tracked in a skewed, unintuitive direction
+      const dir = new THREE.Vector3(0.15, 0.2, 1).normalize()
+      this.camera.position.copy(dir.multiplyScalar(dist))
+      this.camera.lookAt(0, 0, 0)
+      this.camera.updateProjectionMatrix()
+      this.camDist = dist
+    })
+  }
+
+  // tracked on window, not the container — it should turn toward the
+  // cursor everywhere on the page, not just when the mouse is near it
+  _bindEvents() {
+    window.addEventListener('mousemove', e => {
+      this.mouseX = e.clientX
+      this.mouseY = e.clientY
+    })
+  }
+
+  _loop(time) {
+    this.raf = requestAnimationFrame(t => this._loop(t))
+    if (this.root && this.camDist) {
+      const rect = this.container.getBoundingClientRect()
+      const cx = rect.left + rect.width / 2
+      const cy = rect.top + rect.height / 2
+      this.ndc.set(
+        clamp((this.mouseX - cx) / (window.innerWidth / 2), -1, 1),
+        -clamp((this.mouseY - cy) / (window.innerHeight / 2), -1, 1),
+      )
+      this.raycaster.setFromCamera(this.ndc, this.camera)
+      const target = this.raycaster.ray.origin.clone()
+        .addScaledVector(this.raycaster.ray.direction, this.camDist)
+      const lookMatrix = new THREE.Matrix4().lookAt(this.root.position, target, new THREE.Vector3(0, 1, 0))
+      const lookQuat = new THREE.Quaternion().setFromRotationMatrix(lookMatrix)
+      this.root.quaternion.slerp(lookQuat, 0.08)
+    }
+    this.renderer.render(this.scene, this.camera)
+  }
+}
 
 // ─── MAIN WEBGL SCENE ─────────────────────────────────────────────────────────
 
@@ -455,13 +588,8 @@ class MainScene {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.setSize(this.width, this.height)
-    const isDark = document.documentElement.dataset.theme === 'dark'
-    this.renderer.setClearColor(isDark ? 0x000000 : 0xffffff, 1)
+    this.renderer.setClearColor(0x000000, 1)
     this.container.appendChild(this.renderer.domElement)
-
-    window.addEventListener('themechange', e => {
-      this.renderer.setClearColor(e.detail.theme === 'dark' ? 0x000000 : 0xffffff, 1)
-    })
   }
 
   _initCamera() {
@@ -768,25 +896,17 @@ class ParticleSystem {
     geo.setAttribute('position1', new THREE.BufferAttribute(restPositions.slice(), 3))
     this.geo = geo
 
-    const isDark = document.documentElement.dataset.theme === 'dark'
-    const startColor = isDark ? PARTICLE_COLOR_DARK : PARTICLE_COLOR_LIGHT
-
     this.material = new THREE.RawShaderMaterial({
       vertexShader: particleVertexShader,
       fragmentShader: particleFragmentShader,
       glslVersion: THREE.GLSL3,
       uniforms: {
         u_progress: { value: this.u_progress },
-        u_color:    { value: new THREE.Vector3(...startColor) },
+        u_color:    { value: new THREE.Vector3(...PARTICLE_COLOR) },
       }
     })
     this.mesh = new THREE.Points(geo, this.material)
     this.scene.add(this.mesh)
-
-    window.addEventListener('themechange', e => {
-      const c = e.detail.theme === 'dark' ? PARTICLE_COLOR_DARK : PARTICLE_COLOR_LIGHT
-      this.material.uniforms.u_color.value.set(...c)
-    })
 
     /* section heights shift once web fonts swap in (Roboto/Ibarra load async
        with font-display:swap) — anchors measured against the fallback-font
@@ -1971,23 +2091,6 @@ function initMobileMenu() {
   })
 }
 
-function initThemeToggle() {
-  const apply = theme => {
-    if (theme === 'dark') document.documentElement.dataset.theme = 'dark'
-    else delete document.documentElement.dataset.theme
-  }
-
-  const toggle = () => {
-    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'
-    apply(next)
-    localStorage.setItem('theme', next)
-    window.dispatchEvent(new CustomEvent('themechange', { detail: { theme: next } }))
-  }
-
-  document.getElementById('theme-toggle')?.addEventListener('click', toggle)
-  document.getElementById('theme-toggle-mobile')?.addEventListener('click', toggle)
-}
-
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 
 class App {
@@ -2004,7 +2107,6 @@ class App {
     initServiceAccordion()
     initFaqAccordion()
     initMobileMenu()
-    initThemeToggle()
 
     // Init Lenis (graceful fallback if CDN fails)
     if (typeof Lenis !== 'undefined') {
@@ -2043,6 +2145,12 @@ class App {
     }
 
     this.darkSection = darkSection
+
+    // Init projector widget (persistent 3D link to the cinema page)
+    const projectorContainer = document.getElementById('cinema-projector')
+    if (projectorContainer) {
+      this.projectorWidget = new ProjectorWidget(projectorContainer)
+    }
 
     // Header hide-on-scroll-down / show-on-scroll-up
     this.header = document.querySelector('header')

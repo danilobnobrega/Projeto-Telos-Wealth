@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script>
-    if (localStorage.getItem('theme') === 'dark') document.documentElement.dataset.theme = 'dark'
-  </script>
-  <title>John Kleber Fonseca | Consultor de Investimentos · W1 Consultoria</title>
+  <title>Telos Wealth | Planejamento Patrimonial</title>
   <meta name="description" content="Planejamento financeiro 360° — diagnóstico, proteção patrimonial, investimentos e planejamento de aposentadoria. Campinas, São Paulo.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;600&family=Ibarra+Real+Nova:ital,wght@0,400;1,400&family=Zen+Kaku+Gothic+New:wght@400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
-  {"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js"}}
+  {"imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/"
+  }}
   </script>
 </head>
 <body>
@@ -40,12 +40,6 @@
           <li class="nav-item"><div><a href="#faq" class="nav-link" data-animate>FAQ</a><div class="nav-underline"><span class="nav-underline-span"></span></div></div></li>
           <li class="nav-item"><div><a href="#contact" class="nav-link" data-animate>CONTATO</a><div class="nav-underline"><span class="nav-underline-span"></span></div></div></li>
         </ul>
-        <div class="nav-right">
-          <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Alternar tema claro/escuro">
-            <svg class="theme-icon theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-            <svg class="theme-icon theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
-          </button>
-        </div>
       </div>
     </div>
   </section>
@@ -62,10 +56,6 @@
           </div>
         </div>
         <div class="nav-right">
-          <button type="button" class="theme-toggle" id="theme-toggle-mobile" aria-label="Alternar tema claro/escuro">
-            <svg class="theme-icon theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-            <svg class="theme-icon theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
-          </button>
           <button type="button" class="hamburger" id="hamburger" aria-label="menu">
             <span class="hamburger-line hamburger-line-top"></span>
             <span class="hamburger-line hamburger-line-bottom"></span>
@@ -93,14 +83,14 @@
       </div>
     </div>
   </section>
-</header>
 
-<!-- persistent floating link to the video room — visible from the top,
-     everywhere in the scroll, not scroll-triggered -->
-<a href="./cinema.html" class="cinema-fab" aria-label="Sala de vídeos">
-  <span class="cinema-fab-icon">▶</span>
-  <span class="cinema-fab-text">Sala de vídeos</span>
-</a>
+  <!-- persistent link to the video room — a real 3D projector model,
+       docked in the header (see ProjectorWidget in main.js). lives here,
+       not inside .nav-desktop/.nav-mobile, so there's exactly one canvas
+       shared by both breakpoints instead of duplicating the WebGL
+       context. -->
+  <a href="./cinema.html" class="cinema-projector" id="cinema-projector" aria-label="TELOSCINE — sala de cinema"></a>
+</header>
 
 <!-- MAIN CONTENT -->
 <div>
@@ -328,6 +318,6 @@
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/lenis@1.1.14/dist/lenis.min.js"></script>
-<script type="module" src="main.js?v=39"></script>
+<script type="module" src="main.js?v=47"></script>
 </body>
 </html>

@@ -22,6 +22,7 @@ http.createServer((req, res) => {
     res.writeHead(200, {
       'Content-Type': mime,
       'Cache-Control': 'no-cache',
+      'Content-Length': data.length,
     })
     res.end(data)
   })

@@ -1,33 +1,23 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --color-bg: #ffffff;
-  --color-text: #1a1a1a;
-  --ink: 26,26,26;   /* rgb components of --color-text, for use inside rgba() */
-  --bg-rgb: 255,255,255;   /* rgb components of --color-bg, for use inside rgba() */
-  --dark-accent: #0a1628;   /* footer / ring-section navy in light mode */
+  --color-bg: #000000;
+  --color-text: #ffffff;
+  --ink: 255,255,255;   /* rgb components of --color-text, for use inside rgba() */
+  --bg-rgb: 0,0,0;   /* rgb components of --color-bg, for use inside rgba() */
+  --dark-accent: #161616;   /* graphite accent for footer/ring section, stands out against pure black */
   --color-cc: #cccccc;
-  /* same petrol-teal family as the dark-mode background particles
+  /* same petrol-teal family as the background particles
      (PARTICLE_COLOR_DARK in main.js), pushed a bit more saturated/alive
      for UI use — the site was otherwise 100% grayscale, no accent color
      existed anywhere before this */
-  --accent: #2FA894;
-  --accent-rgb: 47,168,148;
+  --accent: #3FCBAE;
+  --accent-rgb: 63,203,174;
   --font-roboto: 'Roboto', sans-serif;
   --font-ibarra: 'Ibarra Real Nova', serif;
   --font-zen: 'Zen Kaku Gothic New', sans-serif;
   --content-w: min(1248px, 86.667vw);
   --content-w-sm: min(327px, 87.2vw);
-}
-
-[data-theme="dark"] {
-  --color-bg: #000000;
-  --color-text: #ffffff;
-  --ink: 255,255,255;
-  --bg-rgb: 0,0,0;
-  --dark-accent: #161616;   /* graphite accent for footer/ring section, stands out against pure black */
-  --accent: #3FCBAE;        /* a touch brighter than the light-mode accent — needs more luminance to read against pure black */
-  --accent-rgb: 63,203,174;
 }
 
 html { scroll-behavior: auto; }
@@ -43,52 +33,32 @@ body {
 
 a { color: inherit; text-decoration: none; }
 
-/* ─── CINEMA FAB ───────────────────────────────────────
-   persistent link to the standalone video-room page (cinema.html) —
-   deliberately its own dark/brass palette regardless of light/dark theme,
-   a small foreshadow of that page's own distinct identity rather than
-   trying to blend into the site's own accent system */
-.cinema-fab {
-  position: fixed;
+/* ─── CINEMA LINK: 3D PROJECTOR ────────────────────────
+   persistent link to the standalone video-room page (cinema.html) — a
+   real 3D projector model (models/projector.glb), its own small WebGL
+   context (see ProjectorWidget in main.js). docked in the header itself
+   (a direct child, not inside .nav-desktop/.nav-mobile — see index.html)
+   so it reads as part of the nav bar and rides along with header's own
+   hide-on-scroll-down behavior, instead of floating as a separate
+   overlay. static at rest — instead of a hover state, it continuously
+   turns to look toward the cursor anywhere on the page (see
+   ProjectorWidget._loop). deliberately allowed to overflow the header's
+   own height a bit — Danilo wants it as large as reasonably possible. */
+.cinema-projector {
+  position: absolute;
+  top: 50%;
   right: min(28px, 2vw);
-  bottom: min(28px, 2vw);
+  transform: translateY(-50%);
   z-index: 500;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 20px 12px 16px;
-  border-radius: 999px;
-  background: #0c0808;
-  border: 1px solid rgba(201, 161, 90, 0.45);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
-  transition: border-color 0.2s ease, transform 0.2s ease;
+  display: block;
+  width: 130px;
+  height: 130px;
+  cursor: pointer;
 }
-.cinema-fab:hover {
-  border-color: #c9a15a;
-  transform: translateY(-2px);
-}
-.cinema-fab-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #c9a15a;
-  color: #0c0808;
-  font-size: 10px;
-}
-.cinema-fab-text {
-  font-family: var(--font-roboto);
-  font-size: 12px;
-  font-weight: 300;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #ece4d8;
-}
-@media (max-width: 640px) {
-  .cinema-fab-text { display: none; }
-  .cinema-fab { padding: 12px; }
+.cinema-projector canvas { display: block; width: 100%; height: 100%; }
+
+@media (max-width: 768px) {
+  .cinema-projector { width: 72px; height: 72px; }
 }
 ul { list-style: none; }
 button { background: none; border: none; cursor: pointer; font: inherit; }
@@ -198,11 +168,8 @@ header.header-hidden {
   height: min(66px, 4.583vw);
   width: auto;
   display: block;
-  /* logo asset is white-on-transparent — invert for the light theme, keep
-     it as-authored (white) in dark mode */
-  filter: invert(1);
+  /* logo asset is white-on-transparent, used as-authored */
 }
-[data-theme="dark"] .brand-logo-img { filter: none; }
 .hero-brand {
   font-family: var(--font-roboto);
   font-weight: 300;
@@ -225,23 +192,6 @@ header.header-hidden {
   align-items: center;
   gap: min(48px, 3.333vw);
 }
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 1px solid rgba(var(--ink),0.2);
-  color: var(--color-text);
-  flex-shrink: 0;
-  transition: border-color 0.2s ease;
-}
-.theme-toggle:hover { border-color: var(--accent); }
-.theme-icon-sun { display: none; }
-.theme-icon-moon { display: block; }
-[data-theme="dark"] .theme-icon-sun { display: block; }
-[data-theme="dark"] .theme-icon-moon { display: none; }
 .nav-item > div { position: relative; }
 .nav-link {
   font-family: var(--font-roboto);
@@ -260,7 +210,11 @@ header.header-hidden {
   position: absolute;
   inset: 0;
   background: var(--accent);
-  transform: translateX(-100%);
+  /* -101%, not -100% — on some label widths (short ones like "FAQ"
+     especially) subpixel rounding left a hairline of accent color
+     peeking at the edge even when fully hidden; the extra 1% is slack
+     that's invisible either way since overflow:hidden already clips it */
+  transform: translateX(-101%);
   transition: transform 0.4s ease;
 }
 .nav-item > div:hover .nav-underline-span { transform: translateX(0); }
@@ -400,11 +354,7 @@ header.header-hidden {
 .scroll-arrow {
   width: min(20px, 1.389vw);
   animation: scroll-bounce 2s ease-in-out infinite;
-}
-/* these two icons are baked as light-theme SVGs — flip them in dark mode */
-[data-theme="dark"] .scroll-arrow,
-[data-theme="dark"] .view-all-icon {
-  filter: invert(1);
+  filter: invert(1); /* baked as a light-theme SVG asset */
 }
 @keyframes scroll-bounce {
   0%, 100% { transform: translateY(0); }
@@ -493,7 +443,7 @@ header.header-hidden {
   font-size: min(12px, 0.833vw);
   font-weight: 300;
 }
-.view-all-icon { width: min(16px, 1.111vw); height: auto; }
+.view-all-icon { width: min(16px, 1.111vw); height: auto; filter: invert(1); /* baked as a light-theme SVG asset */ }
 .view-all-underline {
   position: relative;
   height: 1px;

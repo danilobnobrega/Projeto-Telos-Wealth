@@ -8,6 +8,78 @@ function lerp(a, b, t) { return a + (b - a) * t }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3) }
 
+/* ─── PARTICLE CLAPPERBOARD (lobby preloader) ───────────────────────────
+   same technique as the main Telos site's particle system (main.js): a
+   GPU point cloud morphs between two position buffers via a simple
+   mix() vertex shader, and shapes are built by drawing a silhouette on
+   an offscreen canvas and sampling its filled pixels. adapted here by
+   hand rather than imported — main.js and cinema.js are separate
+   pages/bundles with their own build — but the underlying technique
+   (including the compass needle's CPU-side hinge rotation, reused below
+   for the clapperboard's "clap") is identical, already proven in
+   production on the main site. */
+
+function createChaosAttractorPositions(scale, count, offset, a, b, c, d, e, f) {
+  const raw = new Float32Array(count * 3)
+  const result = new Float32Array(count * 3)
+  for (let i = 0; i < count; i++) {
+    let x = 0, y = 0, z = 0
+    if (i > 0) {
+      x = raw[(i - 1) * 3]
+      y = raw[(i - 1) * 3 + 1]
+      z = raw[(i - 1) * 3 + 2]
+    }
+    raw[i * 3]     = Math.sin(a * y) - Math.cos(b * x)
+    raw[i * 3 + 1] = Math.sin(c * x) - Math.cos(d * y)
+    raw[i * 3 + 2] = Math.sin(e * x) - Math.cos(f * z)
+    result[i * 3]     = raw[i * 3]     * scale + offset
+    result[i * 3 + 1] = raw[i * 3 + 1] * scale
+    result[i * 3 + 2] = raw[i * 3 + 2] * scale
+  }
+  return result
+}
+
+/* test alternative to createChaosAttractorPositions above — plain random
+   scatter inside a cube, no per-point trig/attractor iteration and no
+   temporary `raw` buffer, to check whether the attractor's own setup cost
+   is contributing to the brief early hitch reported in the clapperboard
+   preloader. */
+function createRandomScatterPositions(scale, count) {
+  const result = new Float32Array(count * 3)
+  for (let i = 0; i < count; i++) {
+    result[i * 3]     = (Math.random() * 2 - 1) * scale
+    result[i * 3 + 1] = (Math.random() * 2 - 1) * scale
+    result[i * 3 + 2] = (Math.random() * 2 - 1) * scale
+  }
+  return result
+}
+
+const particleVertexShader = `
+in vec3 position;
+in vec3 position1;
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+uniform float u_progress;
+void main() {
+  vec3 finalPosition = mix(position, position1, u_progress);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(finalPosition, 1.0);
+  gl_PointSize = 1.0;
+}
+`
+const particleFragmentShader = `
+precision mediump float;
+uniform vec3 u_color;
+uniform float u_opacity;
+out vec4 fragColor;
+void main() {
+  fragColor = vec4(u_color, u_opacity);
+}
+`
+const CLAPPER_POINT_COUNT = 180000
+// TEST: gold, just to look at it — was [0.30, 0.48, 0.45] (exact PARTICLE_COLOR_DARK from main.js)
+const CLAPPER_COLOR = [0.79, 0.63, 0.35]
+const CLAPPER_RISE_ANGLE_RAD = 12 * Math.PI / 180 // the transition's wind-up lift, beyond the baked-open pose
+
 /* videoId/poster stay null until real assets exist — swapping them in later
    is a one-line change per topic, nothing else here needs to change. */
 const TOPICS = [
@@ -80,8 +152,7 @@ const SIGN_RED = 0xff2d55
 /* the room itself — a real enclosed cylinder (floor + wall + ceiling, no
    gaps/doors) — a real photo studio backdrop instead of a hand-built
    geometric room, so reflections/lighting on the kiosk read as real. */
-const HDRI_URL = 'models/hdri/ferndale_studio_06_4k.hdr'
-const CURTAIN_IMAGE_URL = 'images/curtain-reference.jpg'
+const HDRI_URL = 'models/hdri/ferndale_studio_06_2k.hdr'
 const LOOK_SENSITIVITY = 0.003  // pixels -> radians, how fast dragging spins the kiosk
 /* stale coordinates from the old primitive kiosk (before the real 3D
    model swap) — recalibrated to a fresh guess near the current kiosk's
@@ -132,12 +203,13 @@ class LobbyScene {
     this.height = window.innerHeight
     this.printing = false
     this.roomMeshes = []
-    this.ready = false // gates drag/click until the curtain has opened — see _initCurtainPreloader
+    this.ready = false // gates drag/click until the clapperboard reveal has finished — see _initClapperboardPreloader
+    this.deferredRevealMeshes = [] // kiosk/sign meshes: built as soon as they load, but kept invisible (zero render cost) until the clapperboard starts dissolving — see _updateClapperboard
 
     this._initCamera()
     this._initScene()
     this._initLoadingManager()
-    this._initCurtainPreloader()
+    this._initClapperboardPreloader()
     this._initEnvironment()
     this._initLights()
     this._initKioskModel()
@@ -146,111 +218,331 @@ class LobbyScene {
     this._bindEvents()
   }
 
-  /* shared by every loader in this scene (kiosk .glb, HDRI .hdr) so the
-     curtain preloader knows exactly when both heavy assets are actually
-     done — not a guessed timer. */
+  /* shared by every loader in this scene (kiosk .glb, HDRI .hdr, kiosk
+     screen image) so the clapperboard's assembly can track real bytes
+     loaded instead of a guessed timer — see update()'s 'loading' phase. */
   _initLoadingManager() {
     this.loadingManager = new THREE.LoadingManager()
-    this.loadingManager.onLoad = () => this._openCurtain()
+    this.loadingManager.onLoad = () => { this.clapperAllLoaded = true }
+    this.clapperByteProgress = new Map() // url -> {loaded, total}, see _trackClapperBytes
   }
 
-  /* a real photo of a velvet curtain (Danilo's own reference image, see
-     images/curtain-reference.jpg), split down the middle — the left half
-     of the photo on curtainL, the right half on curtainR (via
-     texture.repeat/offset) — so the two panels together reconstruct the
-     full photo when closed, then slide apart on open exactly like the
-     photo was torn in two. parented to the camera so it always fills the
-     frame regardless of the camera's exact aim, without needing
-     per-frame position updates. panel size is generously oversized (real
-     coverage needed is well under half that at this FOV/distance even on
-     ultra-wide screens) so it isn't worth recomputing on resize. stays
-     closed until _initLoadingManager's onLoad fires — i.e. until the
-     kiosk model AND the HDRI have both actually finished downloading.
+  /* real byte-level progress across all 3 downloads combined, instead of
+     LoadingManager's own onProgress (item COUNT — with only 3 files
+     tracked, that jumps in 3 big steps: 0%, 33%, 66%, 100%, stalling on
+     whichever step the slow 24MB HDRI happens to be in). each loader
+     below passes its own onProgress here so the clapperboard's assembly
+     tracks the actual, much smoother, network transfer. */
+  _trackClapperBytes(url, loaded, total) {
+    if (!total) return // some responses don't report Content-Length — skip rather than divide by zero
+    this.clapperByteProgress.set(url, { loaded, total })
+    let sumLoaded = 0, sumTotal = 0
+    for (const p of this.clapperByteProgress.values()) {
+      sumLoaded += p.loaded
+      sumTotal += p.total
+    }
+    this.clapperTargetProgress = sumTotal > 0 ? sumLoaded / sumTotal : 0
+  }
 
-     the panels stay invisible until the photo texture itself has loaded
-     — no flat-color fallback. Danilo explicitly didn't want a flash of
-     plain red before the real photo appears, even briefly; the trade-off
-     is a (normally imperceptible, since this file is small and local)
-     moment where nothing covers the screen yet if the image is slow to
-     arrive, versus a guaranteed-instant but wrong-looking red flash. */
-  _initCurtainPreloader() {
+  /* 180k GPU particles assemble into an open clapperboard as the kiosk
+     model + HDRI + screen image load (u_progress tracks real load
+     progress, not a timer), hold once fully loaded, "clap" shut (the
+     arm hinges closed via real per-frame rotation — same CPU technique
+     as the main site's compass needle sweep), then fade out to reveal
+     the kiosk. parented to the camera, sized to its visible frustum at
+     `distance`, same reasoning as the photo curtain this replaces. */
+  _initClapperboardPreloader() {
     this.scene.add(this.camera) // children of the camera only render if the camera itself is in the scene graph
-    /* sized to the camera's actual visible frustum at `distance`, not a
-       flat oversized guess — a panel much bigger than what's on screen
-       means only a tiny sliver near its center ever falls inside the
-       frustum, so the photo texture (UV-mapped across the WHOLE panel)
-       would show as an extreme, blurry crop-zoom instead of the full
-       photo. a 20% margin covers the fold-margin/overlap below without
-       reintroducing that problem. */
-    const distance = 1.2, overlap = 0.15
+    const distance = 1.4
     const vFovRad = THREE.MathUtils.degToRad(CAMERA_FOV)
     const visibleHeight = 2 * Math.tan(vFovRad / 2) * distance
-    const visibleWidth = visibleHeight * (this.width / this.height)
-    const margin = 1.2
-    const height = visibleHeight * margin
-    const width = visibleWidth * margin / 2 + overlap // per panel — half the screen each, plus overlap
-    const matL = new THREE.MeshBasicMaterial()
-    const matR = new THREE.MeshBasicMaterial()
-    this.curtainL = new THREE.Mesh(new THREE.PlaneGeometry(width, height), matL)
-    this.curtainR = new THREE.Mesh(new THREE.PlaneGeometry(width, height), matR)
-    this.curtainL.visible = false
-    this.curtainR.visible = false
-    this.curtainClosedX = width / 2 - overlap
-    this.curtainOpenX = this.curtainClosedX + width * 1.3
-    this.curtainL.position.set(-this.curtainClosedX, 0, -distance)
-    this.curtainR.position.set(this.curtainClosedX, 0, -distance)
-    this.camera.add(this.curtainL, this.curtainR)
-    this.roomMeshes.push(this.curtainL, this.curtainR)
+    const worldSize = visibleHeight * 0.85
 
-    new THREE.TextureLoader().load(CURTAIN_IMAGE_URL, texture => {
-      texture.colorSpace = THREE.SRGBColorSpace
-      const texL = texture
-      const texR = texture.clone()
-      texR.needsUpdate = true
-      texL.wrapS = texL.wrapT = THREE.ClampToEdgeWrapping
-      texR.wrapS = texR.wrapT = THREE.ClampToEdgeWrapping
-      texL.repeat.set(0.5, 1)
-      texL.offset.set(0, 0) // left half of the photo
-      texR.repeat.set(0.5, 1)
-      texR.offset.set(0.5, 0) // right half of the photo
-      matL.map = texL
-      matR.map = texR
-      matL.needsUpdate = true
-      matR.needsUpdate = true
-      this.curtainL.visible = true
-      this.curtainR.visible = true
-      this.curtainRevealStart = performance.now()
+    /* a sparse point cloud has gaps everywhere between individual points
+       — unlike the old solid curtain planes, it never actually hides
+       what's behind it, so the kiosk was visible through the particles
+       the whole time instead of only after the reveal. this opaque
+       backing plane (same sizing approach as the old curtain, just
+       slightly farther from the camera so it renders behind the
+       particles) is what actually blocks the lobby from view until the
+       clap+dissolve sequence finishes. */
+    const backingDistance = distance + 0.2
+    const backingHeight = 2 * Math.tan(vFovRad / 2) * backingDistance * 1.3
+    const backingWidth = backingHeight * (this.width / this.height)
+    this.clapperBackingMat = new THREE.MeshBasicMaterial({ color: 0x080606, transparent: true })
+    this.clapperBacking = new THREE.Mesh(new THREE.PlaneGeometry(backingWidth, backingHeight), this.clapperBackingMat)
+    this.clapperBacking.position.set(0, 0, -backingDistance)
+    this.camera.add(this.clapperBacking)
+    this.roomMeshes.push(this.clapperBacking)
+
+    // TEST: swapped from createChaosAttractorPositions(...) to check whether
+    // the attractor's setup cost (180k serial trig iterations + a temporary
+    // buffer) contributes to the early hitch — revert this one line to go
+    // back to the original starting shape.
+    const restPositions = createRandomScatterPositions(worldSize * 1.2, CLAPPER_POINT_COUNT)
+    const built = this._buildClapperboardPositions(CLAPPER_POINT_COUNT, worldSize)
+    this.clapperMeta = built
+
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(restPositions, 3))
+    geo.setAttribute('position1', new THREE.BufferAttribute(built.positions.slice(), 3))
+    this.clapperGeo = geo
+
+    this.clapperMat = new THREE.RawShaderMaterial({
+      vertexShader: particleVertexShader,
+      fragmentShader: particleFragmentShader,
+      glslVersion: THREE.GLSL3,
+      transparent: true,
+      uniforms: {
+        u_progress: { value: 0 },
+        u_opacity: { value: 1 },
+        u_color: { value: new THREE.Vector3(...CLAPPER_COLOR) },
+      },
     })
+    this.clapperMesh = new THREE.Points(geo, this.clapperMat)
+    this.clapperMesh.position.set(0, 0, -distance)
+    this.camera.add(this.clapperMesh)
+    this.roomMeshes.push(this.clapperMesh)
+
+    this.clapperTargetProgress = 0
+    this.clapperAllLoaded = false
+    this.clapperPhase = 'loading' // loading -> settling -> holding -> dissolving -> done (see _updateClapperboard)
+    this.clapperMode = 'reveal'
+    this.clapperRevealStart = performance.now() // so 'loading' has a minimum visible duration too (see _updateClapperboard) — on a fast/local connection, loading can finish before the assembly animation has had time to actually play
   }
 
-  /* on a fast connection (or localhost) the assets can finish in well
-     under a second — without a floor here, the curtain would flash
-     shut-then-open so quickly it reads as a glitch rather than a
-     deliberate reveal. holding it closed for at least MIN_VISIBLE_MS
-     regardless of how fast loading actually was keeps the reveal
-     legible for every visitor, not just ones on slow connections. */
-  _openCurtain() {
-    const MIN_VISIBLE_MS = 900
-    const elapsed = performance.now() - this.curtainRevealStart
-    const wait = Math.max(0, MIN_VISIBLE_MS - elapsed)
-    setTimeout(() => {
-      this.curtainOpening = true
-      this.curtainOpenStart = performance.now()
-      this.curtainOpenDuration = 2200
-    }, wait)
+  /* draws the clapperboard on an offscreen canvas in two separate passes
+     (board+hinge, then the open striped arm) so filled pixels from each
+     pass can be tagged with which part they belong to — armIndices below —
+     the same way the main site's compass distinguishes its swinging
+     needle from its fixed leg. stripes are drawn as alternating filled/
+     empty diagonal bands (not two colors — this whole point cloud is
+     one uniform u_color), so the gaps between stripes read as the dark
+     bands once sampled. pivot is returned in the same local space as
+     the sampled positions, so the arm angle setter (_setClapperArmAngle)
+     can rotate the arm's points around it directly, no conversion needed. */
+  _buildClapperboardPositions(count, worldSize) {
+    const RES = 512
+    const cv = document.createElement('canvas')
+    cv.width = RES
+    cv.height = RES
+    const ctx = cv.getContext('2d')
+
+    const boardX0 = 50, boardX1 = 462, boardY0 = 260, boardY1 = 470
+    const hinge = { x: boardX0 + 10, y: boardY0 }
+    // ends almost exactly at the board's far edge when closed (was
+    // boardX1-boardX0-20, leaving it ~10px short; +10 overshot past the
+    // edge; -hinge.x alone still overshot by a hair) — tiny -4 nudge back
+    const armLength = boardX1 - hinge.x - 2
+    const armThickness = 60
+    const openAngleRad = 20 * PI / 180
+    const stripeWidth = 30
+
+    const sampleFilled = () => {
+      const img = ctx.getImageData(0, 0, RES, RES).data
+      const pts = []
+      for (let y = 0; y < RES; y++) {
+        for (let x = 0; x < RES; x++) {
+          if (img[(y * RES + x) * 4 + 3] > 40) pts.push(x, y)
+        }
+      }
+      return pts
+    }
+
+    ctx.clearRect(0, 0, RES, RES)
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(boardX0, boardY0, boardX1 - boardX0, boardY1 - boardY0)
+    ctx.beginPath()
+    ctx.arc(hinge.x, hinge.y, 13, 0, PI * 2)
+    ctx.fill()
+    const staticPts = sampleFilled()
+
+    ctx.clearRect(0, 0, RES, RES)
+    ctx.save()
+    ctx.translate(hinge.x, hinge.y)
+    ctx.rotate(-openAngleRad) // canvas Y is down; negative lifts the far end up — the "open" pose
+    ctx.beginPath()
+    ctx.rect(0, -armThickness, armLength, armThickness)
+    ctx.clip()
+    ctx.fillStyle = '#fff'
+    ctx.save()
+    ctx.rotate(PI / 4) // 45° diagonal stripes, within the arm's own already-tilted frame
+    const diag = (armLength + armThickness) * 1.6
+    // phase-shifted (computed, not eyeballed) so a filled band lands at the
+    // tip instead of an empty one — recomputed whenever armLength changes,
+    // since the tip's position (and which stripe band it falls in) moves
+    // with it; without changing the stripe width/spacing or adding any
+    // extra solid patch elsewhere in the pattern
+    const stripePhase = 37.37
+    for (let s = -diag + stripePhase; s < diag; s += stripeWidth * 2) ctx.fillRect(s, -diag, stripeWidth, diag * 2)
+    ctx.restore()
+    ctx.restore()
+    const armPts = sampleFilled()
+
+    const half = worldSize / 2
+    const positions = new Float32Array(count * 3)
+    const armIndices = [] // precomputed once — the per-frame clap sweep walks only these, not all `count` points
+    const totalStatic = staticPts.length / 2
+    const totalArm = armPts.length / 2
+    const armFraction = totalArm / (totalStatic + totalArm)
+
+    for (let i = 0; i < count; i++) {
+      const useArm = Math.random() < armFraction
+      const pool = useArm ? armPts : staticPts
+      const idx = (Math.random() * (pool.length / 2) | 0) * 2
+      const px = pool[idx], py = pool[idx + 1]
+      const jx = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      const jy = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      positions[i * 3]     = (px / RES) * worldSize - half + jx
+      positions[i * 3 + 1] = -((py / RES) * worldSize - half) + jy
+      positions[i * 3 + 2] = (Math.random() - 0.5) * (worldSize * 0.05)
+      if (useArm) armIndices.push(i)
+    }
+
+    const pivot = {
+      x: (hinge.x / RES) * worldSize - half,
+      y: -((hinge.y / RES) * worldSize - half),
+    }
+    return { positions, armIndices, pivot, openAngleRad, basePositions: positions.slice() }
   }
 
-  /* closes the lobby curtain again once a ticket finishes printing, then
-     hands off to the theater — CinemaScene already opens with its own
-     curtain closed and auto-plays its own opening animation on
-     construction, so this reuses that existing reveal instead of
-     building a second, separate transition effect. from the visitor's
-     side it reads as one continuous curtain motion: closes on the
-     kiosk, reopens on the movie. */
-  _closeCurtain() {
-    this.curtainClosing = true
-    this.curtainCloseStart = performance.now()
-    this.curtainCloseDuration = 1400 // quicker than the ~2.2s opens — this one's just covering a scene swap, not asking to be savored
+  /* rotates only the arm-masked particles (position1 buffer) around the
+     hinge, computed fresh from basePositions every call — never
+     compounded — exactly like the compass needle's sweep. angle=0 is the
+     baked-in open pose (same height as the entrance preloader); NEGATIVE
+     angle closes it (double-checked numerically, not just by eye, after
+     the first version had this backwards: -openAngleRad brings it exactly
+     flush/closed against the board — see the Node trig check that caught
+     it); positive angle lifts the arm further open than baseline — used
+     by the transition's wind-up rise. */
+  _setClapperArmAngle(angle) {
+    const { armIndices, pivot, basePositions } = this.clapperMeta
+    const cos = Math.cos(angle), sin = Math.sin(angle)
+    const arr = this.clapperGeo.attributes.position1.array
+    // walks only the arm's own indices (precomputed once, see
+    // _buildClapperboardPositions) instead of all 180k points and
+    // skipping most of them
+    for (let k = 0; k < armIndices.length; k++) {
+      const bi = armIndices[k] * 3
+      const lx = basePositions[bi]     - pivot.x
+      const ly = basePositions[bi + 1] - pivot.y
+      arr[bi]     = lx * cos - ly * sin + pivot.x
+      arr[bi + 1] = lx * sin + ly * cos + pivot.y
+    }
+    this.clapperGeo.attributes.position1.needsUpdate = true
+  }
+
+  /* the clapperboard's own state machine — loading (u_progress tracks
+     real bytes loaded, see _initLoadingManager) -> settling (eases the
+     last bit of progress to exactly 1, no snap) -> then the two modes
+     diverge: mode 'reveal' (the lobby's own entrance preloader) assembles
+     straight into the baked-OPEN board, holds briefly (so a fast/local
+     connection doesn't flash by too fast to read), then dissolves into
+     view of the kiosk — no clap here on purpose, the board just sits open
+     the whole time it's visible. mode 'transition' (the lobby -> theater
+     cut, see _playClapTransition) starts at that exact same open height,
+     then rising (an extra lift beyond baseline — the wind-up) -> falling
+     (one continuous sweep down through baseline all the way to flush/
+     closed — the slam) -> onBuyTicket. */
+  _updateClapperboard() {
+    if (!this.clapperPhase) return
+    if (this.clapperPhase === 'loading') {
+      // once truly loaded, target snaps to 1 — but u_progress still only
+      // LERPS toward it (never jump-set), and the phase can't advance
+      // until MIN_ASSEMBLY_MS has passed since the reveal started, so a
+      // fast/local connection can't skip past actually seeing the
+      // clapperboard assemble
+      const MIN_ASSEMBLY_MS = 1400
+      const target = this.clapperAllLoaded ? 1 : (this.clapperTargetProgress || 0)
+      this.clapperMat.uniforms.u_progress.value = lerp(this.clapperMat.uniforms.u_progress.value, target, 0.06)
+      const elapsed = performance.now() - this.clapperRevealStart
+      if (this.clapperAllLoaded && elapsed >= MIN_ASSEMBLY_MS) {
+        // lerp above never exactly reaches 1 — hand off whatever it got to,
+        // instead of snapping the remainder in one frame (that snap was the
+        // "abrupt" finish reported: whatever fraction hadn't caught up yet
+        // used to pop into place instantly)
+        this.clapperSettleFrom = this.clapperMat.uniforms.u_progress.value
+        this.clapperPhase = 'settling'
+        this.clapperSettleStart = performance.now()
+      }
+    } else if (this.clapperPhase === 'settling') {
+      const SETTLE_DURATION = 220
+      const t = clamp((performance.now() - this.clapperSettleStart) / SETTLE_DURATION, 0, 1)
+      this.clapperMat.uniforms.u_progress.value = lerp(this.clapperSettleFrom, 1, easeOutCubic(t))
+      if (t >= 1) {
+        this.clapperPhase = 'holding'
+        this.clapperHoldStart = performance.now()
+        this.clapperHoldDuration = 900
+      }
+    } else if (this.clapperPhase === 'holding') {
+      // reveal mode only now — assembled straight into the open board and
+      // never touched it (see _initClapperboardPreloader), so once this
+      // brief hold is done there's nothing left to animate, straight to
+      // the dissolve. by now clapperAllLoaded is guaranteed true (it gates
+      // this whole phase chain), so every deferred mesh has already
+      // finished loading — flip them visible now, right as the still-
+      // opaque backing plane starts to fade, so the kiosk is already
+      // there to reveal underneath instead of popping in after the fact
+      if (performance.now() - this.clapperHoldStart >= this.clapperHoldDuration) {
+        for (const m of this.deferredRevealMeshes) m.visible = true
+        this.clapperPhase = 'dissolving'
+        this.clapperDissolveStart = performance.now()
+      }
+    } else if (this.clapperPhase === 'rising') {
+      // transition mode only (see _playClapTransition) — the wind-up: a
+      // quick extra lift past the baseline open height, angle goes
+      // positive (see _setClapperArmAngle)
+      const RISE_DURATION = 300
+      const t = clamp((performance.now() - this.clapperRiseStart) / RISE_DURATION, 0, 1)
+      this._setClapperArmAngle(lerp(0, CLAPPER_RISE_ANGLE_RAD, easeOutCubic(t)))
+      if (t >= 1) {
+        this.clapperPhase = 'falling'
+        this.clapperFallStart = performance.now()
+      }
+    } else if (this.clapperPhase === 'falling') {
+      // the slam: one continuous sweep from the top of the wind-up, down
+      // through the baseline open height, all the way to flush/closed
+      const FALL_DURATION = 420
+      const t = clamp((performance.now() - this.clapperFallStart) / FALL_DURATION, 0, 1)
+      this._setClapperArmAngle(lerp(CLAPPER_RISE_ANGLE_RAD, -this.clapperMeta.openAngleRad, easeOutCubic(t)))
+      if (t >= 1) {
+        this.clapperPhase = 'done'
+        this.onBuyTicket(this.printTopic)
+      }
+    } else if (this.clapperPhase === 'dissolving') {
+      const DISSOLVE_DURATION = 500
+      const t = clamp((performance.now() - this.clapperDissolveStart) / DISSOLVE_DURATION, 0, 1)
+      const alpha = 1 - easeOutCubic(t)
+      this.clapperMat.uniforms.u_opacity.value = alpha
+      this.clapperBackingMat.opacity = alpha
+      if (t >= 1) {
+        this.clapperPhase = 'done'
+        this.clapperMesh.visible = false
+        this.clapperBacking.visible = false
+        this.ready = true
+      }
+    }
+  }
+
+  /* triggers the lobby -> theater cut: the wind-up-and-slam beat that the
+     entrance preloader deliberately skips — starts at the exact same
+     baked-open height the entrance preloader ends at (see
+     _setClapperArmAngle(0), reset here in case a previous transition
+     already left the arm elsewhere), then rises a bit further before
+     sweeping all the way down through that baseline to flush/closed; no
+     dissolve here, since the fall ends fully opaque and covering the
+     frame, which is exactly what should be showing at the moment the
+     scene swaps underneath it. */
+  _playClapTransition() {
+    this._setClapperArmAngle(0)
+    this.clapperMat.uniforms.u_progress.value = 1
+    this.clapperMat.uniforms.u_opacity.value = 1
+    this.clapperMesh.visible = true
+    this.clapperBackingMat.opacity = 1
+    this.clapperBacking.visible = true
+    this.clapperPhase = 'rising'
+    this.clapperRiseStart = performance.now()
+    this.clapperMode = 'transition'
   }
 
   /* fixed camera — no drag-look. dragging spins the kiosk itself instead
@@ -279,20 +571,20 @@ class LobbyScene {
       texture.mapping = THREE.EquirectangularReflectionMapping
       this.scene.environment = texture
       this.hdriTexture = texture
-    })
+    }, e => this._trackClapperBytes(HDRI_URL, e.loaded, e.total))
   }
 
   /* shared by every real 3D asset dropped into the kiosk (counter, printer,
      ...) — loads a .glb and hands back its root scene node. positioning,
      mesh lookups by name, and roomMeshes bookkeeping are the caller's job,
      since those depend on each specific file's own structure. routed
-     through loadingManager so the curtain preloader knows when this
-     finishes too (see _initLoadingManager). */
+     through loadingManager so the clapperboard preloader knows when
+     this finishes too (see _initLoadingManager). */
   _loadGLTF(url) {
     return new Promise((resolve, reject) => {
       const loader = new GLTFLoader(this.loadingManager)
       loader.setMeshoptDecoder(MeshoptDecoder)
-      loader.load(url, gltf => resolve(gltf.scene), undefined, reject)
+      loader.load(url, gltf => resolve(gltf.scene), e => this._trackClapperBytes(url, e.loaded, e.total), reject)
     })
   }
 
@@ -348,6 +640,13 @@ class LobbyScene {
       root.traverse(node => { if (node.isMesh) this.roomMeshes.push(node) })
       this.scene.add(root)
       this.kioskRoot = root // kept so the drag handler can spin the kiosk itself (see _bindEvents)
+      /* stays invisible (fully built, but skipped by the renderer entirely
+         — three.js doesn't draw or shade invisible objects at all) until
+         the clapperboard starts its dissolve, so the GPU never pays for
+         this model's geometry/PBR-reflection cost while it's still hidden
+         behind the opaque preloader anyway. see deferredRevealMeshes. */
+      root.visible = false
+      this.deferredRevealMeshes.push(root)
 
       /* the ticket is built before the kiosk finishes loading (async), so
          it starts out as a direct child of the scene — reparent it under
@@ -450,6 +749,9 @@ class LobbyScene {
 
         this.scene.add(root)
         root.updateMatrixWorld(true)
+        whiteMesh.visible = false
+        redMesh.visible = false
+        this.deferredRevealMeshes.push(whiteMesh, redMesh)
 
         const whiteCenter = new THREE.Box3().setFromObject(whiteMesh).getCenter(new THREE.Vector3())
         const whiteGlow = new THREE.PointLight(0xffffff, SIGN_LIGHT_INTENSITY, SIGN_LIGHT_RANGE, SIGN_LIGHT_DECAY)
@@ -463,6 +765,8 @@ class LobbyScene {
       } else {
         root.traverse(node => { if (node.isMesh) this.roomMeshes.push(node) })
         this.scene.add(root)
+        root.visible = false
+        this.deferredRevealMeshes.push(root)
       }
     })
   }
@@ -537,8 +841,8 @@ class LobbyScene {
      _initKioskModel), same attach() pattern as the ticket, so it's
      "glued" to the screen and spins along with the machine. routed
      through the shared loadingManager so it's already loaded by the
-     time the curtain opens — no separate pop-in after the kiosk itself
-     appears. rotated 180° because the camera sits at a smaller world Z
+     time the clapperboard clap finishes — no separate pop-in after the
+     kiosk itself appears. rotated 180° because the camera sits at a smaller world Z
      than the kiosk (looks toward +Z), so a default-facing plane (normal
      pointing +Z) would show its backface to the camera. */
   _initKioskScreen() {
@@ -556,7 +860,7 @@ class LobbyScene {
     // in depth (top-left forward), on top of the tilt/roll above.
     // confirmed via vector math which twist sign does that.
     mesh.rotateOnAxis(new THREE.Vector3(KIOSK_SCREEN_WIDTH, KIOSK_SCREEN_HEIGHT, 0).normalize(), KIOSK_SCREEN_TWIST)
-    mesh.visible = false // stays hidden until its texture loads — an untextured plane defaults to plain white, which would show through as a flash before the curtain (itself gated on its own texture) has anything to hide it behind
+    mesh.visible = false // stays hidden until its texture loads — an untextured plane defaults to plain white, which would show through as a flash before the clapperboard (itself only revealed once loadingManager confirms everything, including this, is done) has anything to hide it behind
     this.scene.add(mesh)
     this.roomMeshes.push(mesh)
     this.kioskScreenMesh = mesh
@@ -569,7 +873,7 @@ class LobbyScene {
       mat.map = texture
       mat.needsUpdate = true
       mesh.visible = true
-    })
+    }, e => this._trackClapperBytes(KIOSK_SCREEN_IMAGE_URL, e.loaded, e.total))
   }
 
   _ticketTexture(title) {
@@ -643,7 +947,7 @@ class LobbyScene {
     let moved = 0
 
     this._onDown = e => {
-      if (!this.ready || this.curtainClosing) return // curtain still closed, or already closing for the handoff to the theater — nothing to spin or click
+      if (!this.ready || this.clapperMode === 'transition') return // clapperboard still assembling, or already clapping shut for the handoff to the theater — nothing to spin or click
       dragging = true
       moved = 0
       lastX = e.clientX
@@ -678,34 +982,13 @@ class LobbyScene {
   }
 
   update() {
-    if (this.curtainOpening) {
-      const t = clamp((performance.now() - this.curtainOpenStart) / this.curtainOpenDuration, 0, 1)
-      const eased = easeOutCubic(t)
-      const x = lerp(this.curtainClosedX, this.curtainOpenX, eased)
-      this.curtainL.position.x = -x
-      this.curtainR.position.x = x
-      if (t >= 1) {
-        this.curtainOpening = false
-        this.ready = true
-      }
-    }
-    if (this.curtainClosing) {
-      const t = clamp((performance.now() - this.curtainCloseStart) / this.curtainCloseDuration, 0, 1)
-      const eased = easeOutCubic(t)
-      const x = lerp(this.curtainOpenX, this.curtainClosedX, eased)
-      this.curtainL.position.x = -x
-      this.curtainR.position.x = x
-      if (t >= 1) {
-        this.curtainClosing = false
-        this.onBuyTicket(this.printTopic)
-      }
-    }
+    this._updateClapperboard()
     if (this.printing) {
       const t = clamp((performance.now() - this.printStart) / this.printDuration, 0, 1)
       this.ticketMesh.scale.y = lerp(TICKET_START_SCALE, 1, easeOutCubic(t))
       if (t >= 1) {
         this.printing = false
-        this._closeCurtain()
+        this._playClapTransition()
       }
     }
   }
@@ -728,10 +1011,11 @@ class LobbyScene {
 }
 
 /* ─── THEATER ────────────────────────────────────────────────────────────
-   curtain opens on entry, house lights dim as the screening starts,
-   drifting dust, seat silhouettes, canvas-texture "screen" swapped by the
-   marquee. does not own a renderer or loop — see LobbyScene's header note,
-   same reasoning applies here. */
+   static room (no curtain, no drag-look — Danilo locked this in as-is),
+   house lights dim as the screening starts, seat silhouettes,
+   canvas-texture "screen" swapped by the marquee. does not own a
+   renderer or loop — see LobbyScene's header note, same reasoning
+   applies here. */
 class CinemaScene {
   constructor(initialTopic = 0) {
     this.width = window.innerWidth
@@ -892,22 +1176,23 @@ class CinemaScene {
   }
 }
 
-/* ─── APP — one renderer, two scenes ────────────────────────────────────
-   box office first; buying a ticket disposes the lobby and switches the
-   shared loop over to the theater */
+/* ─── APP — two scenes, one renderer at a time ──────────────────────────
+   box office first; buying a ticket disposes the lobby and swaps in a
+   fresh renderer for the theater. two separate renderers (not one shared
+   instance) because antialias is a context-creation flag that can't be
+   toggled per-frame: the lobby's particle preloader is full-screen
+   180k-point rendering that needs every frame to count and gets no
+   visible benefit from MSAA on ~1px points, while the theater's hard
+   geometric edges (seats, screen frame) do benefit from it. only one
+   renderer/context is ever live at a time — the old one is disposed
+   before the new one is created. */
 class CinemaApp {
   constructor(container) {
     this.container = container
     this.width = window.innerWidth
     this.height = window.innerHeight
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    this.renderer.setSize(this.width, this.height)
-    this.renderer.setClearColor(0x080606, 1)
-    this.renderer.shadowMap.enabled = true
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
-    this.container.appendChild(this.renderer.domElement)
+    this.renderer = this._createRenderer({ antialias: true, clearColor: 0x080606, shadows: false })
 
     this.lobby = new LobbyScene(container, topic => this._buyTicket(topic))
     this.active = this.lobby
@@ -916,10 +1201,28 @@ class CinemaApp {
     this._loop(0)
   }
 
+  _createRenderer({ antialias, clearColor, shadows }) {
+    const renderer = new THREE.WebGLRenderer({ antialias, alpha: false })
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setSize(this.width, this.height)
+    renderer.setClearColor(clearColor, 1)
+    if (shadows) {
+      renderer.shadowMap.enabled = true
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    }
+    this.container.appendChild(renderer.domElement)
+    return renderer
+  }
+
   _buyTicket(topic) {
     document.getElementById('cinema-marquee')?.classList.remove('cinema-hidden')
     this.lobby.dispose()
     this.lobby = null
+
+    this.renderer.dispose()
+    this.container.removeChild(this.renderer.domElement)
+    this.renderer = this._createRenderer({ antialias: true, clearColor: 0x080606, shadows: true })
+
     this.theater = new CinemaScene(topic)
     this.theater.onResize(this.width, this.height)
     this.active = this.theater
