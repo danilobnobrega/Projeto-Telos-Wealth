@@ -96,15 +96,16 @@ const PRINTER_SLOT_GUESS = { x: KIOSK_X_OFFSET - 0.167, y: -KIOSK_SINK_Y + 2.8, 
    the fused single-mesh GLB has no named screen sub-part to measure
    against directly. higher than the printer slot (screens sit at
    standing eye level, not waist height) and right at the kiosk's front
-   face. width/height keep the source image's own 900x1600 (9:16)
+   face. width/height keep the source image's own 978x1608
    aspect ratio — SCREEN_HEIGHT independent so it can be tuned without
    distorting the image. */
-const KIOSK_SCREEN_IMAGE_URL = 'images/kiosk-menu-test.jpg'
+const KIOSK_SCREEN_IMAGE_URL = 'images/kiosk-menu-test.png'
 const KIOSK_SCREEN_GUESS = { x: KIOSK_X_OFFSET, y: -KIOSK_SINK_Y + 3.96, z: KIOSK_DEPTH_Z - 0.6825 }
 const KIOSK_SCREEN_HEIGHT = 1.80
-const KIOSK_SCREEN_WIDTH = KIOSK_SCREEN_HEIGHT * (900 / 1600)
+const KIOSK_SCREEN_WIDTH = KIOSK_SCREEN_HEIGHT * (978 / 1608)
 const KIOSK_SCREEN_TILT = 0.077 // radians — positive tilts the TOP of the plane away from the camera (backward); confirmed via vector math, not guessed
 const KIOSK_SCREEN_ROLL = 0 // radians — negative tilts the plane clockwise (as the camera sees it), i.e. right side down; confirmed via vector math against the camera's actual up/right basis, not guessed
+const KIOSK_SCREEN_TWIST = 0.01 // radians — a diagonal twist (not roll): positive pushes the bottom-right corner backward in depth and the top-left forward, around the bottom-left<->top-right diagonal axis; confirmed via vector math, not guessed
 const TICKET_WIDTH = 0.24
 const TICKET_CURL_RADIUS = 0.35 // meters — how tight the roll-curl arc is
 const TICKET_DROOP_SCALE = 0.8  // dampens only the downward (Y) part of the curl, independent of the radius — keeps the paper's overall length/reveal untouched, just falls less at the end
@@ -229,7 +230,6 @@ class LobbyScene {
      regardless of how fast loading actually was keeps the reveal
      legible for every visitor, not just ones on slow connections. */
   _openCurtain() {
-    if (!this.curtainL) return // TEMPORARY — curtain disabled during calibration (see constructor), nothing to open
     const MIN_VISIBLE_MS = 900
     const elapsed = performance.now() - this.curtainRevealStart
     const wait = Math.max(0, MIN_VISIBLE_MS - elapsed)
@@ -238,6 +238,19 @@ class LobbyScene {
       this.curtainOpenStart = performance.now()
       this.curtainOpenDuration = 2200
     }, wait)
+  }
+
+  /* closes the lobby curtain again once a ticket finishes printing, then
+     hands off to the theater — CinemaScene already opens with its own
+     curtain closed and auto-plays its own opening animation on
+     construction, so this reuses that existing reveal instead of
+     building a second, separate transition effect. from the visitor's
+     side it reads as one continuous curtain motion: closes on the
+     kiosk, reopens on the movie. */
+  _closeCurtain() {
+    this.curtainClosing = true
+    this.curtainCloseStart = performance.now()
+    this.curtainCloseDuration = 1400 // quicker than the ~2.2s opens — this one's just covering a scene swap, not asking to be savored
   }
 
   /* fixed camera — no drag-look. dragging spins the kiosk itself instead
@@ -534,6 +547,15 @@ class LobbyScene {
     const mesh = new THREE.Mesh(geo, mat)
     mesh.position.set(KIOSK_SCREEN_GUESS.x, KIOSK_SCREEN_GUESS.y, KIOSK_SCREEN_GUESS.z)
     mesh.rotation.set(KIOSK_SCREEN_TILT, Math.PI, KIOSK_SCREEN_ROLL)
+    // a diagonal "twist" around the real bottom-left<->top-right axis
+    // (KIOSK_SCREEN_WIDTH, KIOSK_SCREEN_HEIGHT, 0) — NOT (1,1,0), which
+    // is only the true diagonal for a square plane; this one isn't
+    // square, and using (1,1,0) moved the bottom-left corner too
+    // (caught after the fact, not predicted). this axis keeps
+    // bottom-left/top-right exactly fixed and pushes bottom-right back
+    // in depth (top-left forward), on top of the tilt/roll above.
+    // confirmed via vector math which twist sign does that.
+    mesh.rotateOnAxis(new THREE.Vector3(KIOSK_SCREEN_WIDTH, KIOSK_SCREEN_HEIGHT, 0).normalize(), KIOSK_SCREEN_TWIST)
     mesh.visible = false // stays hidden until its texture loads — an untextured plane defaults to plain white, which would show through as a flash before the curtain (itself gated on its own texture) has anything to hide it behind
     this.scene.add(mesh)
     this.roomMeshes.push(mesh)
@@ -541,6 +563,9 @@ class LobbyScene {
 
     new THREE.TextureLoader(this.loadingManager).load(KIOSK_SCREEN_IMAGE_URL, texture => {
       texture.colorSpace = THREE.SRGBColorSpace
+      texture.anisotropy = 16 // the plane is tilted (KIOSK_SCREEN_TILT), so the camera sees it at an oblique angle — without this, WebGL's default filtering blurs textures viewed at a shallow angle, regardless of source file quality
+      texture.generateMipmaps = false
+      texture.minFilter = THREE.LinearFilter
       mat.map = texture
       mat.needsUpdate = true
       mesh.visible = true
@@ -618,7 +643,7 @@ class LobbyScene {
     let moved = 0
 
     this._onDown = e => {
-      if (!this.ready) return // curtain still closed — nothing to spin or click yet
+      if (!this.ready || this.curtainClosing) return // curtain still closed, or already closing for the handoff to the theater — nothing to spin or click
       dragging = true
       moved = 0
       lastX = e.clientX
@@ -664,14 +689,23 @@ class LobbyScene {
         this.ready = true
       }
     }
+    if (this.curtainClosing) {
+      const t = clamp((performance.now() - this.curtainCloseStart) / this.curtainCloseDuration, 0, 1)
+      const eased = easeOutCubic(t)
+      const x = lerp(this.curtainOpenX, this.curtainClosedX, eased)
+      this.curtainL.position.x = -x
+      this.curtainR.position.x = x
+      if (t >= 1) {
+        this.curtainClosing = false
+        this.onBuyTicket(this.printTopic)
+      }
+    }
     if (this.printing) {
       const t = clamp((performance.now() - this.printStart) / this.printDuration, 0, 1)
       this.ticketMesh.scale.y = lerp(TICKET_START_SCALE, 1, easeOutCubic(t))
       if (t >= 1) {
         this.printing = false
-        // DISABLED while calibrating the lobby — re-enable this call when
-        // the lobby is done and clicking should cut to the theater again.
-        // this.onBuyTicket(this.printTopic)
+        this._closeCurtain()
       }
     }
   }
@@ -704,17 +738,11 @@ class CinemaScene {
     this.height = window.innerHeight
     this.activeTopic = initialTopic
 
-    this.introStart = performance.now()
-    this.introDuration = 2200
-    this.introDone = false
-
     this._initCamera()
     this._initScene()
     this._initLights()
     this._initScreen()
-    this._initCurtains()
     this._initSeats()
-    this._initDust()
     this._bindMarquee()
 
     /* a ticket was already bought in the lobby — the screening starts the
@@ -723,9 +751,10 @@ class CinemaScene {
     this.setTopic(initialTopic)
   }
 
+  /* static — camera never moves, never re-aims. */
   _initCamera() {
     this.camera = new THREE.PerspectiveCamera(45, this.width / this.height, 0.1, 100)
-    this.camera.position.set(0, 1.2, 9)
+    this.camera.position.set(0, 1.9, 9) // raised above the seat silhouettes (topping out around y=0.75) so they don't clip the screen, and looks down on the audience slightly
     this.camera.lookAt(0, 1.5, -6)
   }
 
@@ -776,9 +805,6 @@ class CinemaScene {
     const W = this.screenCanvas.width, H = this.screenCanvas.height
     ctx.fillStyle = '#050303'
     ctx.fillRect(0, 0, W, H)
-    ctx.strokeStyle = 'rgba(201,161,90,0.4)'
-    ctx.lineWidth = 4
-    ctx.strokeRect(20, 20, W - 40, H - 40)
 
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -800,32 +826,6 @@ class CinemaScene {
       this.dimming = true
       this.dimStart = performance.now()
     }
-  }
-
-  _curtainGeometry(width, height) {
-    const segs = 20
-    const geo = new THREE.PlaneGeometry(width, height, segs, 1)
-    const pos = geo.attributes.position
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i)
-      const foldT = x / width + 0.5
-      const z = Math.sin(foldT * PI * 7) * 0.18
-      pos.setZ(i, pos.getZ(i) + z)
-    }
-    geo.computeVertexNormals()
-    return geo
-  }
-
-  _initCurtains() {
-    const mat = new THREE.MeshStandardMaterial({ color: 0x6e0f1a, roughness: 0.75, metalness: 0.05 })
-    const width = 9, height = 11
-    this.curtainL = new THREE.Mesh(this._curtainGeometry(width, height), mat)
-    this.curtainR = new THREE.Mesh(this._curtainGeometry(width, height), mat)
-    this.curtainClosedX = width / 2
-    this.curtainOpenX = width / 2 + 11
-    this.curtainL.position.set(-this.curtainClosedX, 2, -5.5)
-    this.curtainR.position.set(this.curtainClosedX, 2, -5.5)
-    this.scene.add(this.curtainL, this.curtainR)
   }
 
   _seatSilhouetteTexture() {
@@ -862,25 +862,6 @@ class CinemaScene {
     })
   }
 
-  _initDust() {
-    const count = 400
-    const positions = new Float32Array(count * 3)
-    for (let i = 0; i < count; i++) {
-      const t = Math.random()
-      const spread = lerp(0.3, 4.5, t)
-      positions[i * 3]     = (Math.random() - 0.5) * spread
-      positions[i * 3 + 1] = lerp(3.2, 1.5, t) + (Math.random() - 0.5) * spread * 0.4
-      positions[i * 3 + 2] = lerp(8, -5.5, t)
-    }
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    const mat = new THREE.PointsMaterial({
-      color: 0xffdca8, size: 0.03, transparent: true, opacity: 0.5, sizeAttenuation: true,
-    })
-    this.dust = new THREE.Points(geo, mat)
-    this.scene.add(this.dust)
-  }
-
   _bindMarquee() {
     const marqueeItems = document.querySelectorAll('.cinema-marquee-item')
     marqueeItems.forEach(btn => {
@@ -900,16 +881,7 @@ class CinemaScene {
     this.camera.updateProjectionMatrix()
   }
 
-  update(time) {
-    if (!this.introDone) {
-      const t = clamp((performance.now() - this.introStart) / this.introDuration, 0, 1)
-      const eased = easeOutCubic(t)
-      const x = lerp(this.curtainClosedX, this.curtainOpenX, eased)
-      this.curtainL.position.x = -x
-      this.curtainR.position.x = x
-      if (t >= 1) this.introDone = true
-    }
-
+  update() {
     if (this.dimming) {
       const t = clamp((performance.now() - this.dimStart) / this.dimDuration, 0, 1)
       const eased = easeOutCubic(t)
@@ -917,8 +889,6 @@ class CinemaScene {
       this.fill.intensity = lerp(1.4, 0, eased)
       if (t >= 1) this.dimming = false
     }
-
-    this.dust.rotation.y = time * 0.00005
   }
 }
 
