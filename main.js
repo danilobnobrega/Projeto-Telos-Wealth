@@ -404,16 +404,22 @@ function buildCompassPositions(count) {
 
 // ─── GLSL SHADERS ─────────────────────────────────────────────────────────────
 
+/* a_highlight is 0 for the vast majority of particles at all times — only
+   the fingerprint scanner line (see ParticleSystem._applyFingerprintAction)
+   ever writes nonzero values into it, to make the line actually read as a
+   slightly larger sweep instead of the base point size every other shape
+   uses unmodified. color is untouched — same u_color as everything else. */
 const particleVertexShader = `
 in vec3 position;
 in vec3 position1;
+in float a_highlight;
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
 uniform float u_progress;
 void main() {
   vec3 finalPosition = mix(position, position1, u_progress);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(finalPosition, 1.0);
-  gl_PointSize = 1.0;
+  gl_PointSize = 1.0 + a_highlight * 2.5;
 }
 `
 
@@ -1000,6 +1006,86 @@ function buildOwlPositions(count) {
   return result
 }
 
+/* stylized loop-pattern fingerprint — nested open arcs (not closed circles),
+   each with a little organic wobble so it doesn't read as a machined target/
+   bullseye. same level of abstraction as the compass/hook icons above: not
+   photorealistic, just enough silhouette for the idea to land at particle-
+   cloud resolution. */
+function drawFingerprintIcon(ctx, W, H) {
+  ctx.strokeStyle = '#fff'
+  ctx.lineCap = 'round'
+  ctx.lineWidth = 9
+  const cx = W * 0.5, cy = H * 0.54
+  const RINGS = 12
+  const N = 64
+  for (let ring = 0; ring < RINGS; ring++) {
+    const t = ring / (RINGS - 1)
+    const r = lerp(W * 0.05, W * 0.43, t)
+    /* full closed loop — no open arc/gap */
+    ctx.beginPath()
+    for (let k = 0; k <= N; k++) {
+      const a = lerp(0, PI * 2, k / N)
+      const wobble = Math.sin(a * 5 + ring * 0.6) * (W * 0.007) * (1 + t)
+      const rr = r + wobble
+      const x = cx + Math.cos(a) * rr
+      const y = cy + Math.sin(a) * rr * 0.88   /* slightly taller than wide */
+      if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+    }
+    ctx.stroke()
+  }
+}
+
+/* populated by buildFingerprintPositions the first (and only) time it runs.
+   bandT is a continuous 0 (top) → 1 (bottom) value per particle, straight
+   from its pixel row on the source canvas — not a mask like the other
+   shapes use. see ParticleSystem._applyFingerprintAction, which uses it to
+   drive a horizontal scan line sweeping top to bottom. */
+let fingerprintMeta = null
+
+function buildFingerprintPositions(count) {
+  const RES = 512, worldSize = 350, depthJitter = 25, xOffset = 300
+  const half = worldSize / 2
+
+  const cv = document.createElement('canvas')
+  cv.width = RES; cv.height = RES
+  const ctx = cv.getContext('2d')
+  ctx.clearRect(0, 0, RES, RES)
+  drawFingerprintIcon(ctx, RES, RES)
+  const img = ctx.getImageData(0, 0, RES, RES).data
+  const filled = []
+  for (let y = 0; y < RES; y++) {
+    for (let x = 0; x < RES; x++) {
+      if (img[(y * RES + x) * 4 + 3] > 40) filled.push(x, y)
+    }
+  }
+
+  const result = new Float32Array(count * 3)
+  const bandT = new Float32Array(count)
+
+  if (filled.length > 0) {
+    for (let i = 0; i < count; i++) {
+      const idx = (Math.random() * (filled.length / 2) | 0) * 2
+      const px = filled[idx], py = filled[idx + 1]
+      const jx = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      const jy = (Math.random() - 0.5) * (worldSize / RES) * 1.6
+      result[i * 3]     = (px / RES) * worldSize - half + jx + xOffset
+      result[i * 3 + 1] = -((py / RES) * worldSize - half) + jy
+      result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
+      bandT[i] = py / RES
+    }
+  } else {
+    for (let i = 0; i < count; i++) {
+      result[i * 3]     = (Math.random() - 0.5) * worldSize + xOffset
+      result[i * 3 + 1] = (Math.random() - 0.5) * worldSize
+      result[i * 3 + 2] = (Math.random() - 0.5) * depthJitter
+      bandT[i] = Math.random()
+    }
+  }
+
+  fingerprintMeta = { bandT, basePositions: result.slice() }
+  return result
+}
+
 // ─── PARTICLE SYSTEM ──────────────────────────────────────────────────────────
 
 /* sections that pull the background particles into a symbolic shape as they
@@ -1015,12 +1101,9 @@ const PARTICLE_SHAPES = [
   },
   {
     selector: '.analise-section',
-    build: count => createChaosAttractorPositions(
-      900, count, 400,
-      -0.9177339853982867, 1.5409458316723406,
-      2.279682707438794, 1.3641950476985585,
-      1.9459875364821286, -0.20186017310569326
-    ),
+    build: count => buildFingerprintPositions(count),
+    fingerprintAction: true,   /* a radial "read" pulse travels continuously from the core to the ridges while the shape is formed */
+    plateau: 100,
   },
   {
     selector: '.processo-section',
@@ -1076,7 +1159,9 @@ class ParticleSystem {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(restPositions, 3))
     geo.setAttribute('position1', new THREE.BufferAttribute(restPositions.slice(), 3))
+    geo.setAttribute('a_highlight', new THREE.BufferAttribute(new Float32Array(this.pointCount), 1))
     this.geo = geo
+    this._highlightActive = false   /* tracks whether the highlight buffer needs clearing once the fingerprint scanner stops running (see _applyFingerprintAction) */
 
     this.material = new THREE.RawShaderMaterial({
       vertexShader: particleVertexShader,
@@ -1109,7 +1194,7 @@ class ParticleSystem {
 
   _resolveTargets() {
     const raw = PARTICLE_SHAPES
-      .map(s => ({ el: document.querySelector(s.selector), build: s.build, mode: s.mode, sweep: s.sweep, hookFishAction: s.hookFishAction, kitesAction: s.kitesAction, owlAction: s.owlAction, plateau: s.plateau ?? 0, positions: null, wantOffset: s.anchorOffset ?? 550 }))
+      .map(s => ({ el: document.querySelector(s.selector), build: s.build, mode: s.mode, sweep: s.sweep, hookFishAction: s.hookFishAction, kitesAction: s.kitesAction, owlAction: s.owlAction, fingerprintAction: s.fingerprintAction, plateau: s.plateau ?? 0, positions: null, wantOffset: s.anchorOffset ?? 550 }))
       .filter(t => t.el)
 
     this.targets = raw
@@ -1266,6 +1351,18 @@ class ParticleSystem {
     if (this.activeIndex !== -1 && this.targets[this.activeIndex].owlAction && owlMeta) {
       this._applyOwlAction(this.targets[this.activeIndex])
     }
+    const fingerprintActive = this.activeIndex !== -1 && this.targets[this.activeIndex].fingerprintAction && fingerprintMeta
+    if (fingerprintActive) {
+      this._applyFingerprintAction(this.targets[this.activeIndex])
+      this._highlightActive = true
+    } else if (this._highlightActive) {
+      /* just switched away from the fingerprint shape — clear the shared
+         highlight buffer once so its leftover values don't bleed a bright
+         patch into whatever shape/cloud forms next */
+      this.geo.attributes.a_highlight.array.fill(0)
+      this.geo.attributes.a_highlight.needsUpdate = true
+      this._highlightActive = false
+    }
   }
 
   /* rotates the compass's moving leg around the hinge by real trigonometry
@@ -1421,6 +1518,34 @@ class ParticleSystem {
     flap(wingLeftMask, pivotLeft, -spreadAngle)
     flap(wingRightMask, pivotRight, spreadAngle)
     this.geo.attributes.position1.needsUpdate = true
+  }
+
+  /* the fingerprint itself never moves — position1 for this shape is
+     never touched here. instead a simple horizontal scan line sweeps
+     once from the top to the bottom, tied to SCROLL (not elapsed time,
+     same post-formation dist window the compass sweep/owl fold/kites
+     rise all use), by writing into a_highlight — the vertex shader turns
+     that into a slightly larger band of points (see
+     particleVertexShader), same color as always (u_color untouched).
+     bandT (0 at the top, 1 at the bottom) was precomputed once in
+     buildFingerprintPositions. */
+  _applyFingerprintAction(t) {
+    const { bandT } = fingerprintMeta
+    const arr = this.geo.attributes.a_highlight.array
+
+    const rect = t.el.getBoundingClientRect()
+    const vh = window.innerHeight
+    const dist = (rect.top + t.anchorOffset) - vh / 2
+    const SCAN_START = 95, SCAN_END = -95
+    const scanT = ss(clamp((dist - SCAN_START) / (SCAN_END - SCAN_START), 0, 1))
+
+    const BAND = 0.035  // half-width of the lit scan line, in bandT units
+
+    for (let i = 0; i < bandT.length; i++) {
+      const d = Math.abs(bandT[i] - scanT)
+      arr[i] = d < BAND ? 0.5 * (1 + Math.cos(PI * d / BAND)) : 0
+    }
+    this.geo.attributes.a_highlight.needsUpdate = true
   }
 }
 

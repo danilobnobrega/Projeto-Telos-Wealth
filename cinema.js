@@ -472,7 +472,7 @@ class LobbyScene {
       if (t >= 1) {
         this.clapperPhase = 'holding'
         this.clapperHoldStart = performance.now()
-        this.clapperHoldDuration = 900
+        this.clapperHoldDuration = 700
       }
     } else if (this.clapperPhase === 'holding') {
       // reveal mode only now — assembled straight into the open board and
@@ -492,7 +492,7 @@ class LobbyScene {
       // transition mode only (see _playClapTransition) — the wind-up: a
       // quick extra lift past the baseline open height, angle goes
       // positive (see _setClapperArmAngle)
-      const RISE_DURATION = 300
+      const RISE_DURATION = 350
       const t = clamp((performance.now() - this.clapperRiseStart) / RISE_DURATION, 0, 1)
       this._setClapperArmAngle(lerp(0, CLAPPER_RISE_ANGLE_RAD, easeOutCubic(t)))
       if (t >= 1) {
@@ -502,7 +502,7 @@ class LobbyScene {
     } else if (this.clapperPhase === 'falling') {
       // the slam: one continuous sweep from the top of the wind-up, down
       // through the baseline open height, all the way to flush/closed
-      const FALL_DURATION = 420
+      const FALL_DURATION = 480
       const t = clamp((performance.now() - this.clapperFallStart) / FALL_DURATION, 0, 1)
       this._setClapperArmAngle(lerp(CLAPPER_RISE_ANGLE_RAD, -this.clapperMeta.openAngleRad, easeOutCubic(t)))
       if (t >= 1) {
