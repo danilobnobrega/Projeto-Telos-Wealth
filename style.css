@@ -57,8 +57,57 @@ a { color: inherit; text-decoration: none; }
 }
 .cinema-projector canvas { display: block; width: 100%; height: 100%; }
 
+/* the "what is this" hint — a soft cone of light beaming down from the
+   projector, like it's actually screening something, with the label
+   sitting where that light would land. only appears on hover, so the
+   header stays clean otherwise; the shape itself is the explanation
+   ("it's a projector, it projects") before you even read the words. */
+.cinema-projector-beam {
+  position: absolute;
+  top: calc(94% - 12px);
+  left: calc(50% + 1.5px);
+  width: 64px;
+  height: 76px;
+  transform: translateX(-50%);
+  clip-path: polygon(46% 0, 54% 0, 100% 100%, 0 100%);
+  background: linear-gradient(to bottom, rgba(63, 203, 174, 0.4), rgba(63, 203, 174, 0));
+  filter: blur(1.5px);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+.cinema-projector-hint {
+  position: absolute;
+  top: calc(94% + 56px);
+  left: calc(50% + 1.5px);
+  transform: translateX(-50%) translateY(4px);
+  white-space: nowrap;
+  font-family: var(--font-roboto);
+  font-size: 11px;
+  font-weight: 300;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text);
+  opacity: 0;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  pointer-events: none;
+}
+/* .is-hovering is toggled by ProjectorWidget in main.js from the same
+   precise hit-sphere raycast that drives the "look down" pose — not plain
+   CSS :hover, which fires over the whole square hit-box and would show the
+   beam/hint more loosely than the lens actually reacts to the cursor. */
+.cinema-projector.is-hovering .cinema-projector-beam,
+.cinema-projector.is-hovering .cinema-projector-hint {
+  opacity: 1;
+}
+.cinema-projector.is-hovering .cinema-projector-hint {
+  transform: translateX(-50%) translateY(0);
+}
+
 @media (max-width: 768px) {
   .cinema-projector { width: 72px; height: 72px; }
+  .cinema-projector-beam { width: 44px; height: 52px; top: 92%; }
+  .cinema-projector-hint { top: calc(92% + 46px); font-size: 10px; }
 }
 ul { list-style: none; }
 button { background: none; border: none; cursor: pointer; font: inherit; }

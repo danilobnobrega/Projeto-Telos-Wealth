@@ -89,7 +89,10 @@
        not inside .nav-desktop/.nav-mobile, so there's exactly one canvas
        shared by both breakpoints instead of duplicating the WebGL
        context. -->
-  <a href="./cinema.html" class="cinema-projector" id="cinema-projector" aria-label="TELOSCINE — sala de cinema"></a>
+  <a href="./cinema.html" class="cinema-projector" id="cinema-projector" aria-label="TELOSCINE — Cinema Telos">
+    <span class="cinema-projector-beam" aria-hidden="true"></span>
+    <span class="cinema-projector-hint">Cinema Telos</span>
+  </a>
 </header>
 
 <!-- MAIN CONTENT -->
@@ -318,6 +321,6 @@
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/lenis@1.1.14/dist/lenis.min.js"></script>
-<script type="module" src="main.js?v=70"></script>
+<script type="module" src="main.js?v=78"></script>
 </body>
 </html>

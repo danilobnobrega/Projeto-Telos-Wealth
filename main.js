@@ -525,6 +525,9 @@ function computeVolumetricCentroid(root) {
 }
 
 const PROJECTOR_CANVAS_PX = 130
+// hand-tuned calibration offset for the hover "look straight down" pose —
+// see the comment at its use site in ProjectorWidget._loop
+const HOVER_RIGHT_NUDGE = 0.11
 
 class ProjectorWidget {
   constructor(container) {
@@ -535,6 +538,7 @@ class ProjectorWidget {
     this.mouseY = window.innerHeight / 2
     this.raycaster = new THREE.Raycaster()
     this.ndc = new THREE.Vector2()
+    this.hovering = false
 
     this._initRenderer()
     this._initScene()
@@ -644,7 +648,33 @@ class ProjectorWidget {
       this.camera.position.copy(dir.multiplyScalar(dist))
       this.camera.lookAt(0, 0, 0)
       this.camera.updateProjectionMatrix()
+      this.camera.updateMatrixWorld(true)
+      // "down" as the hover hint means down ON SCREEN, not world -Y — since
+      // the camera is tilted (elevated + pitched down to frame the model),
+      // those two differ by ~11°. the camera's own local -Y axis, expressed
+      // in world space, is what actually renders as "straight down" no
+      // matter the tilt. verified via a real three.js Camera: world -Y is
+      // (0,-1,0), the camera's true screen-down is (0,-0.9806,0.1961).
+      this.camDown = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1).negate()
+      this.camRight = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0)
       this.camDist = dist
+
+      /* hover hit-test target: a fixed, never-rotating invisible sphere
+         around the model — NOT a raycast against the model mesh itself.
+         raycasting the live mesh created a feedback loop: as the lens
+         rotates down (away from the cursor), the mesh's silhouette moves
+         with it, the raycast stops hitting, hover turns off, it swings
+         back toward the cursor, hits again, hover turns back on — an
+         oscillation that never let it settle. a fixed sphere has no such
+         loop. margin kept close to 1 (the model's real bounding-sphere
+         radius) so hover reads as "touching the projector", not merely
+         being near it — a circumscribing sphere already covers a little
+         empty space around the model's actual silhouette, so this errs
+         slightly tight rather than slightly loose. */
+      const hoverMargin = 0.85
+      this.hitSphere = new THREE.Mesh(new THREE.SphereGeometry(sphere.radius * hoverMargin, 12, 8))
+      this.hitSphere.visible = false
+      this.scene.add(this.hitSphere)
     })
   }
 
@@ -668,6 +698,17 @@ class ProjectorWidget {
         -(this.mouseY - cy) / (rect.height / 2),
       )
       this.raycaster.setFromCamera(this.ndc, this.camera)
+      // hover state comes from a raycast against the fixed hit-sphere
+      // (see _loadModel), not the model mesh itself — see the comment
+      // there for why the mesh itself caused an oscillation — and not the
+      // (much larger, square) container box either, so the down-pointing
+      // hint only kicks in near/on the rendered projector, not the header
+      this.hovering = !!this.hitSphere && this.raycaster.intersectObject(this.hitSphere).length > 0
+      // drives the CSS beam/hint too (see style.css .is-hovering rules) —
+      // both the lens-down pose and the visual hint now key off the exact
+      // same precise hit-test, instead of the lens using the tight sphere
+      // while the beam/hint used the loose full-box CSS :hover
+      this.container.classList.toggle('is-hovering', this.hovering)
       const target = this.raycaster.ray.origin.clone()
         .addScaledVector(this.raycaster.ray.direction, this.camDist)
       /* when the cursor sits almost exactly over the widget, the ray
@@ -679,6 +720,16 @@ class ProjectorWidget {
          is on you, so look at the viewer" is the only sane answer, and
          it's well-defined (camera position is never near the origin). */
       if (target.lengthSq() < (this.camDist * 0.05) ** 2) target.copy(this.camera.position)
+      // on hover, lock the lens straight down instead of tracking the
+      // cursor, so it matches the fixed-direction light-beam hint below it
+      // — simpler and more robust than making the beam chase the lens.
+      // small manual nudge to the right: camDown is the mathematically
+      // exact screen-vertical direction for the "Glass" mesh's bbox-center
+      // vector, but the model's real optical axis isn't perfectly that
+      // vector (Danilo reported it visually reading a bit left of true
+      // down) — this is a calibration constant, tune HOVER_RIGHT_NUDGE if
+      // it's still off.
+      if (this.hovering) target.copy(this.camDown).addScaledVector(this.camRight, HOVER_RIGHT_NUDGE)
       // the rule: object center, lens, and cursor on one exact line — aim
       // the real lens vector at the target, keeping roll sane (see
       // computeLensLookRotation's own comment for why plain
