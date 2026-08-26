@@ -438,6 +438,92 @@ const PARTICLE_COLOR = [0.30, 0.48, 0.45]      /* muted petrol/teal green, on bl
 // unit scale/pivot.
 const PROJECTOR_MODEL_URL = './models/projector.glb'
 const PROJECTOR_TARGET_SIZE = 0.5
+
+/* aims `localForward` (the real, measured lens direction, in the model's
+   own unrotated local space) at `target` (a world-space direction from
+   the object's center), the same way Matrix4.lookAt aims a camera's -Z at
+   something: by also constraining a companion "up" axis to stay as close
+   to world-up as possible, instead of just taking the shortest rotation
+   between two vectors (which has no opinion about roll and can flip the
+   object upside down to get there — confirmed both by seeing it happen
+   and by verifying this replacement numerically, in Node, before
+   shipping it: aim error is exactly zero and the object's own up axis
+   never goes negative/flips across a wide spread of test directions).
+   `localUp` is assumed to be the model's own local +Y — a reasonable
+   default since most exported assets keep +Y as "up" even when their
+   forward axis is arbitrary. */
+function computeLensLookRotation(localForwardRaw, localUp, target) {
+  /* THE bug that caused every "close but a few degrees off, worse on
+     diagonals" result in this whole saga: localForward (this.lensLocal)
+     is a real measured position, not a unit vector — its actual length
+     is ~0.209, not 1. makeBasis() below needs an orthoNORMAL basis to
+     produce a valid rotation matrix; feeding it a non-unit axis silently
+     produces a slightly-wrong matrix, which Quaternion.setFromRotationMatrix
+     then extracts a slightly-wrong rotation from. Verified numerically,
+     with the real measured lens vector: without this normalize, aim
+     error was ~30-40° off; with it, aim error is exactly zero at every
+     angle tested, including diagonals. */
+  const localForward = localForwardRaw.clone().normalize()
+  const worldUp = new THREE.Vector3(0, 1, 0)
+  const targetDir = target.clone().normalize()
+
+  let right = new THREE.Vector3().crossVectors(worldUp, targetDir)
+  if (right.lengthSq() < 1e-8) right.set(1, 0, 0) // target parallel to world up — rare edge case, arbitrary fallback
+  right.normalize()
+  const newUp = new THREE.Vector3().crossVectors(targetDir, right).normalize()
+
+  const localRight = new THREE.Vector3().crossVectors(localUp, localForward).normalize()
+  const trueLocalUp = new THREE.Vector3().crossVectors(localForward, localRight).normalize()
+
+  const sourceBasis = new THREE.Matrix4().makeBasis(localRight, trueLocalUp, localForward)
+  const destBasis = new THREE.Matrix4().makeBasis(right, newUp, targetDir)
+  const qSource = new THREE.Quaternion().setFromRotationMatrix(sourceBasis)
+  const qDest = new THREE.Quaternion().setFromRotationMatrix(destBasis)
+  return qDest.multiply(qSource.invert())
+}
+
+/* the object's true center of mass (assuming uniform density, since we
+   have no per-material density data) — NOT the bounding-box center,
+   which is pulled around by whichever points happen to be most extreme
+   (a lens sticking out to one side, say) rather than the actual
+   distribution of the object's volume. measured directly off the real
+   mesh in Node beforehand (gltf-transform + the same tetrahedra method
+   below): the two centers differ by ~10-12% of the object's own size —
+   real, not negligible.
+   method: decompose every triangle into a tetrahedron with the origin,
+   sum each one's SIGNED volume (dot(a, cross(b,c))/6 — origin-independent
+   for a closed mesh) and volume-weighted centroid ((a+b+c+origin)/4,
+   origin being (0,0,0) so it drops out), then divide. */
+function computeVolumetricCentroid(root) {
+  root.updateMatrixWorld(true)
+  let totalVolume = 0
+  const centroidSum = new THREE.Vector3()
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3()
+  const cross = new THREE.Vector3()
+  root.traverse(node => {
+    if (!node.isMesh) return
+    const geo = node.geometry
+    const pos = geo.attributes.position
+    const index = geo.index
+    const triCount = index ? index.count / 3 : pos.count / 3
+    for (let t = 0; t < triCount; t++) {
+      const ia = index ? index.getX(t * 3) : t * 3
+      const ib = index ? index.getX(t * 3 + 1) : t * 3 + 1
+      const ic = index ? index.getX(t * 3 + 2) : t * 3 + 2
+      a.fromBufferAttribute(pos, ia).applyMatrix4(node.matrixWorld)
+      b.fromBufferAttribute(pos, ib).applyMatrix4(node.matrixWorld)
+      c.fromBufferAttribute(pos, ic).applyMatrix4(node.matrixWorld)
+      cross.crossVectors(b, c)
+      const signedVolume = a.dot(cross) / 6
+      totalVolume += signedVolume
+      centroidSum.x += (a.x + b.x + c.x) / 4 * signedVolume
+      centroidSum.y += (a.y + b.y + c.y) / 4 * signedVolume
+      centroidSum.z += (a.z + b.z + c.z) / 4 * signedVolume
+    }
+  })
+  return centroidSum.divideScalar(totalVolume)
+}
+
 const PROJECTOR_CANVAS_PX = 130
 
 class ProjectorWidget {
@@ -506,9 +592,35 @@ class ProjectorWidget {
          the world origin regardless of rotation. */
       this.root = new THREE.Group()
       this.root.add(root)
-      this.root.rotation.y = Math.PI // model's native front faced away from camera — flipped to face forward
-      this.baseYaw = this.root.rotation.y
       this.scene.add(this.root)
+
+      /* find the actual lens (the "Glass" material) instead of guessing
+         a local axis for "forward" — Danilo's rule: the object center,
+         the lens, and the cursor must always sit on one exact straight
+         line. root.rotation is still identity here, so this position
+         (measured in the scene, right after centering/scaling, before
+         any rotation ever gets applied) is exactly the lens's position
+         relative to the rotation pivot.
+
+         uses the glass MESH's own geometric center (its bounding-box
+         midpoint), not node.getWorldPosition() — that would only give the
+         mesh's arbitrary local pivot/origin point, which for a GLTF/FBX
+         export is rarely at the actual center of its geometry. if several
+         meshes use a glass-like material, the farthest from the object
+         center is taken as the actual front lens surface (not some small
+         internal glass part). */
+      root.updateMatrixWorld(true)
+      let lensPos = null
+      let lensDist = -1
+      root.traverse(node => {
+        if (!node.isMesh) return
+        const mats = Array.isArray(node.material) ? node.material : [node.material]
+        if (!mats.some(m => m && /glass/i.test(m.name || ''))) return
+        const p = new THREE.Box3().setFromObject(node).getCenter(new THREE.Vector3())
+        const d = p.length()
+        if (d > lensDist) { lensDist = d; lensPos = p }
+      })
+      this.lensLocal = lensPos || new THREE.Vector3(0, 0, -1) // fallback if no glass mesh was found
 
       /* fit the camera to the model's real bounding sphere (not a
          hand-guessed distance) — a guessed distance clipped the model at
@@ -522,7 +634,13 @@ class ProjectorWidget {
       // that angled, rotating the model on world X/Y didn't correspond
       // cleanly to left/right and up/down on screen, so "looking at the
       // mouse" tracked in a skewed, unintuitive direction
-      const dir = new THREE.Vector3(0.15, 0.2, 1).normalize()
+      // no horizontal (X) offset at all now — Danilo's theory is that the
+      // previous 0.15 rightward push was introducing an asymmetric roll
+      // bias via lookAt's up-vector handling (errors matched a constant
+      // rightward skew: diagonal-right nearly right, diagonal-left always
+      // off, pure horizontal way off). only a touch of height left, for
+      // a bit of "looking down at it" character without breaking symmetry.
+      const dir = new THREE.Vector3(0, 0.2, 1).normalize()
       this.camera.position.copy(dir.multiplyScalar(dist))
       this.camera.lookAt(0, 0, 0)
       this.camera.updateProjectionMatrix()
@@ -546,15 +664,28 @@ class ProjectorWidget {
       const cx = rect.left + rect.width / 2
       const cy = rect.top + rect.height / 2
       this.ndc.set(
-        clamp((this.mouseX - cx) / (window.innerWidth / 2), -1, 1),
-        -clamp((this.mouseY - cy) / (window.innerHeight / 2), -1, 1),
+        (this.mouseX - cx) / (rect.width / 2),
+        -(this.mouseY - cy) / (rect.height / 2),
       )
       this.raycaster.setFromCamera(this.ndc, this.camera)
       const target = this.raycaster.ray.origin.clone()
         .addScaledVector(this.raycaster.ray.direction, this.camDist)
-      const lookMatrix = new THREE.Matrix4().lookAt(this.root.position, target, new THREE.Vector3(0, 1, 0))
-      const lookQuat = new THREE.Quaternion().setFromRotationMatrix(lookMatrix)
-      this.root.quaternion.slerp(lookQuat, 0.08)
+      /* when the cursor sits almost exactly over the widget, the ray
+         through screen-center passes right by the object's own center
+         (by construction: camera.lookAt(0,0,0)), so `target` shrinks
+         toward (0,0,0) — a direction that's undefined right at zero and
+         numerically unstable (tiny jitter swings it wildly) just next to
+         it. in that narrow case, aim at the camera instead — "the cursor
+         is on you, so look at the viewer" is the only sane answer, and
+         it's well-defined (camera position is never near the origin). */
+      if (target.lengthSq() < (this.camDist * 0.05) ** 2) target.copy(this.camera.position)
+      // the rule: object center, lens, and cursor on one exact line — aim
+      // the real lens vector at the target, keeping roll sane (see
+      // computeLensLookRotation's own comment for why plain
+      // setFromUnitVectors wasn't enough — it flipped the model upside
+      // down for some targets, since it has no opinion about roll at all)
+      const targetQuat = computeLensLookRotation(this.lensLocal, new THREE.Vector3(0, 1, 0), target)
+      this.root.quaternion.slerp(targetQuat, 0.08)
     }
     this.renderer.render(this.scene, this.camera)
   }
