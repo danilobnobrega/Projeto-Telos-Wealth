@@ -79,13 +79,18 @@ const CLAPPER_POINT_COUNT = 180000
 const CLAPPER_COLOR = [0.79, 0.63, 0.35]
 const CLAPPER_RISE_ANGLE_RAD = 12 * Math.PI / 180 // the transition's wind-up lift, beyond the baked-open pose
 
+/* sessionStorage key used by CinemaApp to remember "already bought a
+   ticket this session" — a refresh mid-screening stays in the theater
+   instead of dropping back to the lobby (see CinemaApp's constructor). */
+const CINEMA_SESSION_KEY = 'telosCinemaTopic'
+
 /* videoId/poster stay null until real assets exist — swapping them in later
    is a one-line change per topic, nothing else here needs to change. */
 const TOPICS = [
   { title: 'Modelo Fee-Only', videoId: null, poster: null },
   { title: 'O cliente Telos', videoId: null, poster: null },
   { title: 'O que fazemos diferente', videoId: null, poster: null },
-  { title: 'Nossa origem', videoId: null, poster: null },
+  { title: 'Nossa origem', videoId: 'cTj7wGdqYMc', poster: null },
 ]
 
 /* the AI-generated kiosk (bancada+computador+mouse+impressora, one fused
@@ -997,15 +1002,17 @@ class LobbyScene {
    renderer or loop — see LobbyScene's header note, same reasoning
    applies here. */
 class CinemaScene {
-  constructor(initialTopic = 0) {
+  constructor(initialTopic = 0, container = null) {
     this.width = window.innerWidth
     this.height = window.innerHeight
     this.activeTopic = initialTopic
+    this.container = container
 
     this._initCamera()
     this._initScene()
     this._initLights()
     this._initScreen()
+    this._initVideoOverlay()
     this._initSeats()
     this._bindMarquee()
 
@@ -1049,6 +1056,17 @@ class CinemaScene {
   }
 
   _initScreen() {
+    /* single source of truth for the screen's 3D transform — both the
+       actual 3D backing mesh (below) and the video <iframe> overlay (see
+       _updateVideoOverlayRect) are positioned/sized from these exact same
+       numbers, so they can never drift apart again. screenCenterY raised
+       from the original 1.5 per Danilo's approved on-screen nudge
+       (verified against the projection math, not eyeballed). */
+    this.screenHalfW = 8
+    this.screenHalfH = 4.5
+    this.screenCenterY = 3.4
+    this.screenZ = -6
+
     const cv = document.createElement('canvas')
     cv.width = 1024
     cv.height = 576
@@ -1057,10 +1075,10 @@ class CinemaScene {
     this._drawScreenTexture(TOPICS[0].title)
 
     this.screenTexture = new THREE.CanvasTexture(cv)
-    const geo = new THREE.PlaneGeometry(16, 9)
+    const geo = new THREE.PlaneGeometry(this.screenHalfW * 2, this.screenHalfH * 2)
     const mat = new THREE.MeshBasicMaterial({ map: this.screenTexture })
     this.screenMesh = new THREE.Mesh(geo, mat)
-    this.screenMesh.position.set(0, 1.5, -6)
+    this.screenMesh.position.set(0, this.screenCenterY, this.screenZ)
     this.scene.add(this.screenMesh)
   }
 
@@ -1081,10 +1099,80 @@ class CinemaScene {
     ctx.fillText(title, W / 2, H / 2 + 30)
   }
 
+  /* a real video can't be painted onto the 3D screen mesh as a WebGL
+     texture — YouTube only exposes its player inside a sandboxed iframe,
+     never raw frames. instead, an actual <iframe> DOM element sits on top
+     of the canvas, sized/positioned to exactly cover the screen mesh's
+     on-screen rectangle. this only works cleanly because both the camera
+     and the screen are static (see _initCamera's own comment) — the
+     rectangle is computed once, not re-derived every frame. */
+  _initVideoOverlay() {
+    if (!this.container) return
+    const iframe = document.createElement('iframe')
+    iframe.style.position = 'absolute'
+    iframe.style.border = '0'
+    iframe.style.display = 'none'
+    iframe.allow = 'autoplay; encrypted-media; picture-in-picture'
+    iframe.allowFullscreen = true
+    this.videoOverlay = iframe
+    this.container.appendChild(iframe)
+    this._updateVideoOverlayRect()
+  }
+
+  /* projects the screen plane's 4 corners — using this.screenHalfW/
+     screenHalfH/screenCenterY/screenZ, the exact same numbers the real 3D
+     mesh is built/positioned from (see _initScreen) — instead of just
+     center+size, so any slight trapezoidal skew from the camera's own
+     off-axis position (it's raised above and looks slightly down, per
+     _initCamera) still yields a sane bounding rectangle. because both the
+     mesh and this overlay read from the same source values, there's no
+     separate pixel-nudge to keep in sync by hand anymore — move the
+     screen, and both move together, at any viewport size. */
+  _updateVideoOverlayRect() {
+    if (!this.videoOverlay) return
+    const hw = this.screenHalfW, hh = this.screenHalfH, cy = this.screenCenterY, cz = this.screenZ
+    const corners = [
+      new THREE.Vector3(-hw, cy - hh, cz),
+      new THREE.Vector3(hw, cy - hh, cz),
+      new THREE.Vector3(-hw, cy + hh, cz),
+      new THREE.Vector3(hw, cy + hh, cz),
+    ]
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+    for (const c of corners) {
+      c.project(this.camera)
+      const px = (c.x * 0.5 + 0.5) * this.width
+      const py = (1 - (c.y * 0.5 + 0.5)) * this.height
+      if (px < minX) minX = px
+      if (px > maxX) maxX = px
+      if (py < minY) minY = py
+      if (py > maxY) maxY = py
+    }
+    this.videoOverlay.style.left = `${minX}px`
+    this.videoOverlay.style.top = `${minY}px`
+    this.videoOverlay.style.width = `${maxX - minX}px`
+    this.videoOverlay.style.height = `${maxY - minY}px`
+  }
+
   setTopic(i) {
     this.activeTopic = i
+    /* keep the saved session topic current on every switch, not just the
+       initial ticket purchase — otherwise a refresh after switching topics
+       via the marquee would restore the ORIGINAL topic bought, not
+       whichever one was actually on screen. */
+    sessionStorage.setItem(CINEMA_SESSION_KEY, String(i))
     this._drawScreenTexture(TOPICS[i].title)
     this.screenTexture.needsUpdate = true
+
+    const videoId = TOPICS[i].videoId
+    if (this.videoOverlay) {
+      if (videoId) {
+        this.videoOverlay.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`
+        this.videoOverlay.style.display = 'block'
+      } else {
+        this.videoOverlay.style.display = 'none'
+        this.videoOverlay.src = ''   // stops playback when switching to a topic with no video yet
+      }
+    }
 
     if (!this.dimming && this.ambient.intensity > this.DIM_INTENSITY) {
       this.dimming = true
@@ -1143,6 +1231,7 @@ class CinemaScene {
     this.height = height
     this.camera.aspect = width / height
     this.camera.updateProjectionMatrix()
+    this._updateVideoOverlayRect()
   }
 
   update() {
@@ -1172,10 +1261,22 @@ class CinemaApp {
     this.width = window.innerWidth
     this.height = window.innerHeight
 
-    this.renderer = this._createRenderer({ antialias: true, clearColor: 0x080606, shadows: false })
-
-    this.lobby = new LobbyScene(container, topic => this._buyTicket(topic))
-    this.active = this.lobby
+    /* refreshing mid-screening should stay in the theater, not send the
+       person back through the lobby again — refreshing the lobby itself
+       should still show the lobby. sessionStorage (not localStorage) so
+       this only lasts the current tab/session, not forever. */
+    const savedTopic = sessionStorage.getItem(CINEMA_SESSION_KEY)
+    if (savedTopic !== null) {
+      document.getElementById('cinema-marquee')?.classList.remove('cinema-hidden')
+      this.renderer = this._createRenderer({ antialias: true, clearColor: 0x080606, shadows: true })
+      this.theater = new CinemaScene(Number(savedTopic), this.container)
+      this.theater.onResize(this.width, this.height)
+      this.active = this.theater
+    } else {
+      this.renderer = this._createRenderer({ antialias: true, clearColor: 0x080606, shadows: false })
+      this.lobby = new LobbyScene(container, topic => this._buyTicket(topic))
+      this.active = this.lobby
+    }
 
     window.addEventListener('resize', () => this._onResize())
     this._loop(0)
@@ -1203,7 +1304,7 @@ class CinemaApp {
     this.container.removeChild(this.renderer.domElement)
     this.renderer = this._createRenderer({ antialias: true, clearColor: 0x080606, shadows: true })
 
-    this.theater = new CinemaScene(topic)
+    this.theater = new CinemaScene(topic, this.container)
     this.theater.onResize(this.width, this.height)
     this.active = this.theater
   }
