@@ -57,6 +57,18 @@ a { color: inherit; text-decoration: none; }
 }
 .cinema-projector canvas { display: block; width: 100%; height: 100%; }
 
+/* the projector deliberately overflows the header's own (shorter) height
+   above — so header.header-hidden's translateY(-100%) (which moves by the
+   header's own box height, not the projector's) doesn't fully carry it
+   off-screen: part of it stays visible and clickable even while the header
+   is "hidden". force it invisible/unclickable explicitly instead of
+   relying on the transform math to happen to cover it. */
+header.header-hidden .cinema-projector {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
 /* the "what is this" hint — a soft cone of light beaming down from the
    projector, like it's actually screening something, with the label
    sitting where that light would land. only appears on hover, so the
