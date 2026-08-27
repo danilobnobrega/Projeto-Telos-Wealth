@@ -1,7 +1,6 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js'
-import { RGBELoader } from 'three/addons/loaders/RGBELoader.js'
 
 const PI = Math.PI
 function lerp(a, b, t) { return a + (b - a) * t }
@@ -149,10 +148,6 @@ const SIGN_SPLIT_FRACTION = 0.63 // was 5/9≈0.556 — red was eating into the 
 const SIGN_SPLIT_FLIP = true    // the local axis runs opposite to the visual left-right reading direction — red was landing on the visual left (TELOS side) instead of the right (CINE side)
 const SIGN_RED = 0xff2d55
 
-/* the room itself — a real enclosed cylinder (floor + wall + ceiling, no
-   gaps/doors) — a real photo studio backdrop instead of a hand-built
-   geometric room, so reflections/lighting on the kiosk read as real. */
-const HDRI_URL = 'models/hdri/ferndale_studio_06_2k.hdr'
 const LOOK_SENSITIVITY = 0.003  // pixels -> radians, how fast dragging spins the kiosk
 /* stale coordinates from the old primitive kiosk (before the real 3D
    model swap) — recalibrated to a fresh guess near the current kiosk's
@@ -210,7 +205,6 @@ class LobbyScene {
     this._initScene()
     this._initLoadingManager()
     this._initClapperboardPreloader()
-    this._initEnvironment()
     this._initLights()
     this._initKioskModel()
     this._initTicket()
@@ -558,20 +552,7 @@ class LobbyScene {
 
   _initScene() {
     this.scene = new THREE.Scene()
-  }
-
-  /* photo studio HDRI — used only for scene.environment (lighting/
-     reflections on the kiosk's materials); scene.background stays a
-     solid black instead of the HDRI photo itself, per Danilo's call
-     after comparing both. loaded async like everything else GLB/texture
-     in this scene; the kiosk itself doesn't wait on it. */
-  _initEnvironment() {
     this.scene.background = new THREE.Color(0x000000)
-    new RGBELoader(this.loadingManager).load(HDRI_URL, texture => {
-      texture.mapping = THREE.EquirectangularReflectionMapping
-      this.scene.environment = texture
-      this.hdriTexture = texture
-    }, e => this._trackClapperBytes(HDRI_URL, e.loaded, e.total))
   }
 
   /* shared by every real 3D asset dropped into the kiosk (counter, printer,
@@ -1006,7 +987,6 @@ class LobbyScene {
         m.material.dispose()
       }
     })
-    this.hdriTexture?.dispose()
   }
 }
 
