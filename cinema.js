@@ -98,11 +98,14 @@ const TOPICS = [
   { title: 'Nossa origem', videoId: 'cTj7wGdqYMc', poster: null },
 ]
 
-/* a plain click on the kiosk (see LobbyScene._bindEvents) buys whichever
-   topic actually has a video, not a hardcoded index — stays correct on
-   its own if a different topic gets the video later. falls back to 0 if
-   none do yet. */
-const DEFAULT_TOPIC_INDEX = Math.max(0, TOPICS.findIndex(t => t.videoId))
+/* the kiosk screen image (KIOSK_SCREEN_IMAGE_URL) is 4 stacked panel
+   covers, one per topic, in this top-to-bottom order — a click on the
+   kiosk screen (see LobbyScene._bindEvents) buys whichever panel was hit.
+   confirmed with Danilo panel-by-panel, doesn't follow TOPICS' own order
+   or read directly off the panel titles — e.g. "Por que Telos?" (panel 1)
+   maps to the "Nossa origem" topic (index 3), not to "O cliente Telos".
+   each panel is an even 1/4 of the image's height. */
+const KIOSK_SCREEN_PANEL_TOPICS = [0, 3, 2, 1]
 
 /* the AI-generated kiosk (bancada+computador+mouse+impressora, one fused
    mesh, no named sub-parts) — position/scale/screen/printer-slot are all
@@ -941,13 +944,17 @@ class LobbyScene {
 
   /* a drag spins the kiosk itself in place (free, unclamped — camera
      stays fixed); a plain click (movement stays under the threshold)
-     buys the DEFAULT_TOPIC_INDEX ticket instead and cuts to the theater —
-     switching to a different topic means going back to the lobby (the
-     "← Lobby" back link) and picking another poster */
+     raycasts against the kiosk screen specifically — hitting one of its 4
+     panel covers buys THAT panel's topic (see KIOSK_SCREEN_PANEL_TOPICS),
+     any other click (missed the screen entirely, e.g. the kiosk's frame)
+     does nothing. switching to a different topic later means going back
+     to the lobby (the "← Lobby" back link) and picking another panel */
   _bindEvents() {
     let dragging = false
     let lastX = 0, lastY = 0
     let moved = 0
+    const raycaster = new THREE.Raycaster()
+    const ndc = new THREE.Vector2()
 
     this._onDown = e => {
       if (!this.ready || this.clapperMode === 'transition') return // clapperboard still assembling, or already clapping shut for the handoff to the theater — nothing to spin or click
@@ -965,9 +972,19 @@ class LobbyScene {
       moved += Math.abs(dx) + Math.abs(dy)
       if (this.kioskRoot) this.kioskRoot.rotation.y += dx * LOOK_SENSITIVITY
     }
-    this._onUp = () => {
+    this._onUp = e => {
       dragging = false
-      if (moved < 6) this._startPrinting(DEFAULT_TOPIC_INDEX)
+      if (moved >= 6 || !this.kioskScreenMesh) return
+      const rect = this.container.getBoundingClientRect()
+      ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+      ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+      raycaster.setFromCamera(ndc, this.camera)
+      const hit = raycaster.intersectObject(this.kioskScreenMesh)[0]
+      if (!hit || !hit.uv) return
+      // uv.y=1 is the TOP of the source image (texture.flipY default), so
+      // panel 0 (top, "Nosso Manifesto") needs 1-uv.y, not uv.y directly
+      const panelIndex = Math.min(3, Math.floor((1 - hit.uv.y) * 4))
+      this._startPrinting(KIOSK_SCREEN_PANEL_TOPICS[panelIndex])
     }
     this._onLeave = () => { dragging = false }
 
