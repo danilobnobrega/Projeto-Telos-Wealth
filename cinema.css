@@ -44,56 +44,6 @@ html, body {
 }
 .cinema-back:hover { opacity: 1; color: var(--cinema-brass); }
 
-.cinema-marquee {
-  position: fixed;
-  left: 50%;
-  bottom: 40px;
-  transform: translateX(-50%);
-  z-index: 10;
-  text-align: center;
-  width: min(720px, 90vw);
-}
-.cinema-marquee-title {
-  font-family: 'Ibarra Real Nova', serif;
-  font-style: italic;
-  font-size: 14px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--cinema-brass);
-  margin-bottom: 14px;
-}
-.cinema-marquee-list {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px 14px;
-}
-.cinema-marquee-item {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(201, 161, 90, 0.35);
-  color: var(--cinema-cream);
-  font-family: 'Roboto', sans-serif;
-  font-weight: 300;
-  font-size: 13px;
-  letter-spacing: 0.03em;
-  padding: 10px 18px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
-}
-.cinema-marquee-item:hover {
-  border-color: var(--cinema-brass);
-  color: var(--cinema-brass);
-}
-.cinema-marquee-item.active {
-  background: var(--cinema-brass);
-  border-color: var(--cinema-brass);
-  color: var(--cinema-black);
-}
-
 @media (max-width: 640px) {
   .cinema-back { top: 18px; left: 18px; font-size: 11px; }
-  .cinema-marquee { bottom: 24px; }
-  .cinema-marquee-item { font-size: 12px; padding: 8px 14px; }
 }

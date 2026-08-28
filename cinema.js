@@ -79,19 +79,30 @@ const CLAPPER_POINT_COUNT = 180000
 const CLAPPER_COLOR = [0.79, 0.63, 0.35]
 const CLAPPER_RISE_ANGLE_RAD = 12 * Math.PI / 180 // the transition's wind-up lift, beyond the baked-open pose
 
-/* sessionStorage key used by CinemaApp to remember "already bought a
-   ticket this session" — a refresh mid-screening stays in the theater
-   instead of dropping back to the lobby (see CinemaApp's constructor). */
+/* sessionStorage keys CinemaApp uses so a refresh always lands back on
+   whichever screen (lobby or theater) was actually showing — see
+   CinemaApp's constructor. CINEMA_SESSION_KEY alone isn't enough: it only
+   says "a ticket was bought at some point this session", which stays set
+   even after navigating back to the lobby, so a lobby refresh would
+   wrongly jump to the theater. CINEMA_SCREEN_KEY tracks which screen is
+   CURRENT, updated on every transition. */
 const CINEMA_SESSION_KEY = 'telosCinemaTopic'
+const CINEMA_SCREEN_KEY = 'telosCinemaScreen'
 
 /* videoId/poster stay null until real assets exist — swapping them in later
    is a one-line change per topic, nothing else here needs to change. */
 const TOPICS = [
-  { title: 'Modelo Fee-Only', videoId: null, poster: null },
-  { title: 'O cliente Telos', videoId: null, poster: null },
-  { title: 'O que fazemos diferente', videoId: null, poster: null },
+  { title: 'Modelo Fee-Only', videoId: 'EjR4urjE4t8', poster: null },
+  { title: 'O cliente Telos', videoId: 'lUC4wsG6ESg', poster: null },
+  { title: 'O que fazemos diferente', videoId: 'vT1dsdy4oy8', poster: null },
   { title: 'Nossa origem', videoId: 'cTj7wGdqYMc', poster: null },
 ]
+
+/* a plain click on the kiosk (see LobbyScene._bindEvents) buys whichever
+   topic actually has a video, not a hardcoded index — stays correct on
+   its own if a different topic gets the video later. falls back to 0 if
+   none do yet. */
+const DEFAULT_TOPIC_INDEX = Math.max(0, TOPICS.findIndex(t => t.videoId))
 
 /* the AI-generated kiosk (bancada+computador+mouse+impressora, one fused
    mesh, no named sub-parts) — position/scale/screen/printer-slot are all
@@ -170,7 +181,7 @@ const PRINTER_SLOT_GUESS = { x: KIOSK_X_OFFSET - 0.167, y: -KIOSK_SINK_Y + 2.8, 
    face. width/height keep the source image's own 978x1608
    aspect ratio — SCREEN_HEIGHT independent so it can be tuned without
    distorting the image. */
-const KIOSK_SCREEN_IMAGE_URL = 'images/kiosk-menu-test.png'
+const KIOSK_SCREEN_IMAGE_URL = 'images/kiosk-menu.png'
 const KIOSK_SCREEN_GUESS = { x: KIOSK_X_OFFSET, y: -KIOSK_SINK_Y + 3.96, z: KIOSK_DEPTH_Z - 0.6825 }
 const KIOSK_SCREEN_HEIGHT = 1.80
 const KIOSK_SCREEN_WIDTH = KIOSK_SCREEN_HEIGHT * (978 / 1608)
@@ -853,9 +864,15 @@ class LobbyScene {
 
     new THREE.TextureLoader(this.loadingManager).load(KIOSK_SCREEN_IMAGE_URL, texture => {
       texture.colorSpace = THREE.SRGBColorSpace
+      /* anisotropic filtering NEEDS mipmaps to actually do anything — it
+         interpolates across mip levels to compensate for the oblique
+         viewing angle. generateMipmaps=false previously left anisotropy
+         with nothing to work with, so fine detail (the panel titles) came
+         out aliased/rough instead of clean — same texture pipeline, so
+         the same problem carried over from the previous image untouched. */
       texture.anisotropy = 16 // the plane is tilted (KIOSK_SCREEN_TILT), so the camera sees it at an oblique angle — without this, WebGL's default filtering blurs textures viewed at a shallow angle, regardless of source file quality
-      texture.generateMipmaps = false
-      texture.minFilter = THREE.LinearFilter
+      texture.generateMipmaps = true
+      texture.minFilter = THREE.LinearMipmapLinearFilter
       mat.map = texture
       mat.needsUpdate = true
       mesh.visible = true
@@ -924,9 +941,9 @@ class LobbyScene {
 
   /* a drag spins the kiosk itself in place (free, unclamped — camera
      stays fixed); a plain click (movement stays under the threshold)
-     buys the default (topic 0) ticket instead and cuts to the theater,
-     where the marquee (unchanged) already lets you switch among all 4
-     topics */
+     buys the DEFAULT_TOPIC_INDEX ticket instead and cuts to the theater —
+     switching to a different topic means going back to the lobby (the
+     "← Lobby" back link) and picking another poster */
   _bindEvents() {
     let dragging = false
     let lastX = 0, lastY = 0
@@ -950,7 +967,7 @@ class LobbyScene {
     }
     this._onUp = () => {
       dragging = false
-      if (moved < 6) this._startPrinting(0)
+      if (moved < 6) this._startPrinting(DEFAULT_TOPIC_INDEX)
     }
     this._onLeave = () => { dragging = false }
 
@@ -998,9 +1015,10 @@ class LobbyScene {
 /* ─── THEATER ────────────────────────────────────────────────────────────
    static room (no curtain, no drag-look — Danilo locked this in as-is),
    house lights dim as the screening starts, seat silhouettes,
-   canvas-texture "screen" swapped by the marquee. does not own a
-   renderer or loop — see LobbyScene's header note, same reasoning
-   applies here. */
+   canvas-texture "screen". switching topics happens by going back to the
+   lobby and picking another poster (see CinemaApp._returnToLobby), not
+   from inside the theater. does not own a renderer or loop — see
+   LobbyScene's header note, same reasoning applies here. */
 class CinemaScene {
   constructor(initialTopic = 0, container = null) {
     this.width = window.innerWidth
@@ -1014,7 +1032,6 @@ class CinemaScene {
     this._initScreen()
     this._initVideoOverlay()
     this._initSeats()
-    this._bindMarquee()
 
     /* a ticket was already bought in the lobby — the screening starts the
        moment you walk in, so this both draws the right title on screen
@@ -1064,7 +1081,7 @@ class CinemaScene {
        (verified against the projection math, not eyeballed). */
     this.screenHalfW = 8
     this.screenHalfH = 4.5
-    this.screenCenterY = 3.4
+    this.screenCenterY = 3.25
     this.screenZ = -6
 
     const cv = document.createElement('canvas')
@@ -1072,21 +1089,43 @@ class CinemaScene {
     cv.height = 576
     this.screenCanvas = cv
     this.screenCtx = cv.getContext('2d')
-    this._drawScreenTexture(TOPICS[0].title)
+    this._drawScreenTexture(TOPICS[0].title, !!TOPICS[0].videoId)
 
     this.screenTexture = new THREE.CanvasTexture(cv)
-    const geo = new THREE.PlaneGeometry(this.screenHalfW * 2, this.screenHalfH * 2)
+    /* the mesh's own shape/position — deliberately separate from
+       screenHalfW/screenHalfH/screenCenterY above, which still drive the
+       video overlay unchanged (see _updateVideoOverlayRect). Danilo's
+       read of the two side by side: the top edge already lines up, the
+       bottom sits a bit lower than the video, and both sides are a touch
+       wider than the video — so only the bottom and the sides come in a
+       little, top untouched, still a plain rectangle (no trapezoid). */
+    const MESH_Y_TEMP_ADJUST = -0.5   // overall vertical nudge (top edge reference), already approved
+    const MESH_BOTTOM_SHRINK = 0.3    // raises the bottom edge up a bit
+    const MESH_WIDTH_SHRINK = 0.3     // trims a bit off both sides equally
+    const MESH_EXPAND = 0.15          // nudges all 4 edges back out a touch, on top of the shrink above
+    const MESH_Y_SHIFT = -0.1         // pure translation, mesh only — height stays exactly the same, just moves down a touch (video overlay untouched)
+    const MESH_WIDTH_EXPAND2 = 0.1    // a bit more width only, mesh only
+    const meshTopY = this.screenCenterY + MESH_Y_TEMP_ADJUST + this.screenHalfH + MESH_EXPAND + MESH_Y_SHIFT
+    const meshBottomY = this.screenCenterY + MESH_Y_TEMP_ADJUST - this.screenHalfH + MESH_BOTTOM_SHRINK - MESH_EXPAND + MESH_Y_SHIFT
+    const meshHalfW = this.screenHalfW - MESH_WIDTH_SHRINK + MESH_EXPAND + MESH_WIDTH_EXPAND2
+
+    const geo = new THREE.PlaneGeometry(meshHalfW * 2, meshTopY - meshBottomY)
     const mat = new THREE.MeshBasicMaterial({ map: this.screenTexture })
     this.screenMesh = new THREE.Mesh(geo, mat)
-    this.screenMesh.position.set(0, this.screenCenterY, this.screenZ)
+    this.screenMesh.position.set(0, (meshTopY + meshBottomY) / 2, this.screenZ)
     this.scene.add(this.screenMesh)
   }
 
-  _drawScreenTexture(title) {
+  _drawScreenTexture(title, hasVideo = false) {
     const ctx = this.screenCtx
     const W = this.screenCanvas.width, H = this.screenCanvas.height
-    ctx.fillStyle = '#050303'
+    ctx.fillStyle = '#000000'
     ctx.fillRect(0, 0, W, H)
+
+    /* topics with a real video play the YouTube overlay on top of this
+       canvas — the backing screen itself should just stay plain black,
+       not show the "coming soon" placeholder behind/around it. */
+    if (hasVideo) return
 
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -1155,12 +1194,10 @@ class CinemaScene {
 
   setTopic(i) {
     this.activeTopic = i
-    /* keep the saved session topic current on every switch, not just the
-       initial ticket purchase — otherwise a refresh after switching topics
-       via the marquee would restore the ORIGINAL topic bought, not
-       whichever one was actually on screen. */
+    /* keeps the saved session topic current — a refresh while in the
+       theater restores whichever topic was actually bought/showing. */
     sessionStorage.setItem(CINEMA_SESSION_KEY, String(i))
-    this._drawScreenTexture(TOPICS[i].title)
+    this._drawScreenTexture(TOPICS[i].title, !!TOPICS[i].videoId)
     this.screenTexture.needsUpdate = true
 
     const videoId = TOPICS[i].videoId
@@ -1214,18 +1251,6 @@ class CinemaScene {
     })
   }
 
-  _bindMarquee() {
-    const marqueeItems = document.querySelectorAll('.cinema-marquee-item')
-    marqueeItems.forEach(btn => {
-      if (Number(btn.dataset.topic) === this.activeTopic) btn.classList.add('active')
-      btn.addEventListener('click', () => {
-        marqueeItems.forEach(b => b.classList.remove('active'))
-        btn.classList.add('active')
-        this.setTopic(Number(btn.dataset.topic))
-      })
-    })
-  }
-
   onResize(width, height) {
     this.width = width
     this.height = height
@@ -1234,7 +1259,7 @@ class CinemaScene {
     this._updateVideoOverlayRect()
   }
 
-  update() {
+  update(time) {
     if (this.dimming) {
       const t = clamp((performance.now() - this.dimStart) / this.dimDuration, 0, 1)
       const eased = easeOutCubic(t)
@@ -1242,6 +1267,21 @@ class CinemaScene {
       this.fill.intensity = lerp(1.4, 0, eased)
       if (t >= 1) this.dimming = false
     }
+  }
+
+  dispose() {
+    if (this.videoOverlay) {
+      this.videoOverlay.src = ''
+      this.videoOverlay.remove()
+    }
+    const mapKeys = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap']
+    this.scene.traverse(obj => {
+      obj.geometry?.dispose()
+      if (obj.material) {
+        mapKeys.forEach(key => obj.material[key]?.dispose())
+        obj.material.dispose()
+      }
+    })
   }
 }
 
@@ -1261,25 +1301,53 @@ class CinemaApp {
     this.width = window.innerWidth
     this.height = window.innerHeight
 
-    /* refreshing mid-screening should stay in the theater, not send the
-       person back through the lobby again — refreshing the lobby itself
-       should still show the lobby. sessionStorage (not localStorage) so
-       this only lasts the current tab/session, not forever. */
+    /* a refresh should always land back on whichever screen was actually
+       showing — lobby stays lobby, theater stays theater. sessionStorage
+       (not localStorage) so this only lasts the current tab/session, not
+       forever. two keys are needed: CINEMA_SESSION_KEY alone only says "a
+       ticket was bought at some point this session", which stays set even
+       after coming back to the lobby — CINEMA_SCREEN_KEY tracks which
+       screen is CURRENT, so a lobby refresh doesn't wrongly reuse a stale
+       topic from an earlier visit. and a fresh navigation here (e.g.
+       clicking the projector from the main site) must always show the
+       lobby regardless of either key — only an actual browser reload
+       (checked via the Navigation Timing API) may resume the theater. */
+    const navEntry = performance.getEntriesByType('navigation')[0]
+    const isReload = navEntry ? navEntry.type === 'reload' : false
     const savedTopic = sessionStorage.getItem(CINEMA_SESSION_KEY)
-    if (savedTopic !== null) {
-      document.getElementById('cinema-marquee')?.classList.remove('cinema-hidden')
+    const savedScreen = sessionStorage.getItem(CINEMA_SCREEN_KEY)
+    if (isReload && savedScreen === 'theater' && savedTopic !== null) {
       this.renderer = this._createRenderer({ antialias: true, clearColor: 0x080606, shadows: true })
       this.theater = new CinemaScene(Number(savedTopic), this.container)
       this.theater.onResize(this.width, this.height)
       this.active = this.theater
     } else {
+      sessionStorage.setItem(CINEMA_SCREEN_KEY, 'lobby')
       this.renderer = this._createRenderer({ antialias: true, clearColor: 0x080606, shadows: false })
       this.lobby = new LobbyScene(container, topic => this._buyTicket(topic))
       this.active = this.lobby
     }
 
+    /* one back link, two behaviors: in the lobby it's a normal link out
+       to the main site; in the theater it instead returns to the lobby
+       (no full page reload) — text and click behavior both follow
+       whichever scene is currently active. */
+    this.backLink = document.getElementById('cinema-back')
+    this.backLink?.addEventListener('click', e => {
+      if (this.active === this.theater) {
+        e.preventDefault()
+        this._returnToLobby()
+      }
+    })
+    this._updateBackLink()
+
     window.addEventListener('resize', () => this._onResize())
     this._loop(0)
+  }
+
+  _updateBackLink() {
+    if (!this.backLink) return
+    this.backLink.textContent = this.active === this.theater ? '← Lobby' : '← Telos Wealth'
   }
 
   _createRenderer({ antialias, clearColor, shadows }) {
@@ -1296,7 +1364,7 @@ class CinemaApp {
   }
 
   _buyTicket(topic) {
-    document.getElementById('cinema-marquee')?.classList.remove('cinema-hidden')
+    sessionStorage.setItem(CINEMA_SCREEN_KEY, 'theater')
     this.lobby.dispose()
     this.lobby = null
 
@@ -1307,6 +1375,22 @@ class CinemaApp {
     this.theater = new CinemaScene(topic, this.container)
     this.theater.onResize(this.width, this.height)
     this.active = this.theater
+    this._updateBackLink()
+  }
+
+  _returnToLobby() {
+    sessionStorage.setItem(CINEMA_SCREEN_KEY, 'lobby')
+    sessionStorage.removeItem(CINEMA_SESSION_KEY)
+    this.theater.dispose()
+    this.theater = null
+
+    this.renderer.dispose()
+    this.container.removeChild(this.renderer.domElement)
+    this.renderer = this._createRenderer({ antialias: true, clearColor: 0x080606, shadows: false })
+
+    this.lobby = new LobbyScene(this.container, topic => this._buyTicket(topic))
+    this.active = this.lobby
+    this._updateBackLink()
   }
 
   _onResize() {
